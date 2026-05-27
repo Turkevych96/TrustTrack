@@ -1,0 +1,39 @@
+{% load money %}
+
+<section class="section-gap">
+    <div class="section-title">
+        <h2>{{ activity_title|default:"Activity" }}</h2>
+        {% if activity_preview and activity_has_more %}
+            <a href="{% url 'ledger:obligation_history' obligation.id %}">View more</a>
+        {% endif %}
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Activity</th>
+                    <th>Details</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in activity_rows %}
+                    <tr>
+                        <td>{{ row.event.event_date }}</td>
+                        <td>{{ row.label }}</td>
+                        <td>{{ row.details|default:"-" }}</td>
+                        <td class="amount {{ row.amount_class }}">{{ row.signed_amount_units|signed_money_units }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4" class="empty">No activity yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if activity_preview and activity_has_more %}
+        <div class="muted section-gap">Showing the latest 10 of {{ activity_total }} events.</div>
+    {% elif not activity_preview %}
+        <div class="muted section-gap">{{ activity_total }} total activity events.</div>
+    {% endif %}
+</section>

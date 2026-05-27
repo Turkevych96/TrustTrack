@@ -84,46 +84,52 @@ def obligation_list(request):
 @login_required
 def obligation_detail(request, pk):
     obligation = get_related_obligation(request.user, pk)
-    ledger_entries_queryset = (
-        LedgerEntry.objects.filter(account__obligation=obligation)
-        .select_related('transaction', 'account')
-        .order_by('-effective_date', '-created_at')
-    )
     financial_events_queryset = FinancialEvent.objects.filter(obligation=obligation).order_by('-event_date')
-    interest_runs_queryset = InterestAccrualRun.objects.filter(obligation=obligation).order_by(
-        '-period_start',
-        '-revision',
-    )
     event_series = (
         EventSeries.objects.filter(obligation=obligation)
         .prefetch_related('versions')
         .order_by('name')
     )
-    ledger_entries_total = ledger_entries_queryset.count()
-    financial_events_total = financial_events_queryset.count()
-    interest_runs_total = interest_runs_queryset.count()
+    activity_total = financial_events_queryset.count()
     context = {
         'obligation': obligation,
         'balance_units': get_obligation_balance(obligation),
         'role': _role_for(obligation, request.user),
-        'ledger_entries': ledger_entries_queryset[:HISTORY_PREVIEW_LIMIT],
-        'ledger_entries_total': ledger_entries_total,
-        'ledger_entries_has_more': ledger_entries_total > HISTORY_PREVIEW_LIMIT,
-        'financial_events': financial_events_queryset[:HISTORY_PREVIEW_LIMIT],
-        'financial_events_total': financial_events_total,
-        'financial_events_has_more': financial_events_total > HISTORY_PREVIEW_LIMIT,
+        'activity_rows': [
+            _activity_row(event, request.user)
+            for event in financial_events_queryset.select_related('obligation')[:HISTORY_PREVIEW_LIMIT]
+        ],
+        'activity_title': 'Recent activity',
+        'activity_preview': True,
+        'activity_total': activity_total,
+        'activity_has_more': activity_total > HISTORY_PREVIEW_LIMIT,
         'event_series_rows': [_event_series_row(series) for series in event_series],
         'interest_rates': InterestRatePeriod.objects.filter(obligation=obligation).order_by('-effective_from'),
-        'interest_runs': interest_runs_queryset[:HISTORY_PREVIEW_LIMIT],
-        'interest_runs_total': interest_runs_total,
-        'interest_runs_has_more': interest_runs_total > HISTORY_PREVIEW_LIMIT,
-        'history_preview': True,
     }
     return render(request, 'ledger/obligation_detail.html', context)
 
 
 @login_required
 def obligation_history(request, pk):
+    obligation = get_related_obligation(request.user, pk)
+    financial_events = FinancialEvent.objects.filter(obligation=obligation).select_related('obligation').order_by('-event_date')
+    activity_total = financial_events.count()
+    return render(
+        request,
+        'ledger/obligation_history.html',
+        {
+            'obligation': obligation,
+            'activity_rows': [_activity_row(event, request.user) for event in financial_events],
+            'activity_title': 'Activity history',
+            'activity_preview': False,
+            'activity_total': activity_total,
+            'activity_has_more': False,
+        },
+    )
+
+
+@login_required
+def obligation_accounting_history(request, pk):
     obligation = get_related_obligation(request.user, pk)
     ledger_entries = (
         LedgerEntry.objects.filter(account__obligation=obligation)
@@ -134,7 +140,7 @@ def obligation_history(request, pk):
     interest_runs = InterestAccrualRun.objects.filter(obligation=obligation).order_by('-period_start', '-revision')
     return render(
         request,
-        'ledger/obligation_history.html',
+        'ledger/obligation_accounting_history.html',
         {
             'obligation': obligation,
             'ledger_entries': ledger_entries,
@@ -429,6 +435,39 @@ def _event_series_schedule_label(series):
     if series.frequency == EventSeries.Frequency.MONTHLY:
         return f'{series.get_frequency_display()} on day {series.day_of_month}'
     return f'{series.get_frequency_display()} on {_weekday_name(series.day_of_week)}'
+
+
+def _activity_row(event, user):
+    signed_amount_units = _signed_event_amount_units(event, user)
+    return {
+        'event': event,
+        'label': _activity_label(event, user),
+        'signed_amount_units': signed_amount_units,
+        'amount_class': 'positive' if signed_amount_units >= 0 else 'negative',
+        'details': event.memo or event.category,
+    }
+
+
+def _signed_event_amount_units(event, user):
+    user_is_borrower = event.obligation.borrower_id == user.id
+    if event.direction == FinancialEvent.Direction.INCREASES_DEBT:
+        return event.amount_units if user_is_borrower else -event.amount_units
+    return -event.amount_units if user_is_borrower else event.amount_units
+
+
+def _activity_label(event, user):
+    user_is_borrower = event.obligation.borrower_id == user.id
+    if event.event_type == FinancialEvent.EventType.PRINCIPAL_ADVANCE:
+        return 'You borrowed' if user_is_borrower else 'You lent'
+    if event.event_type == FinancialEvent.EventType.REPAYMENT:
+        return 'You paid' if user_is_borrower else 'You received'
+    if event.event_type == FinancialEvent.EventType.SCHEDULED_CHARGE:
+        return 'Charge added'
+    if event.event_type == FinancialEvent.EventType.INTEREST_POSTING:
+        return 'Interest added'
+    if event.event_type == FinancialEvent.EventType.ADJUSTMENT:
+        return 'Adjustment'
+    return event.get_event_type_display()
 
 
 def _weekday_name(day_of_week):

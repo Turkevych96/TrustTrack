@@ -1,0 +1,18 @@
+{% extends "ledger/base.html" %}
+
+{% block title %}Accounting ledger - {{ obligation.title }} - TrustTrack{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>{{ obligation.title }} accounting ledger</h1>
+        <div class="muted">Double-entry accounting details for audit and troubleshooting.</div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'ledger:obligation_history' obligation.id %}">Back to activity</a>
+        <a class="button secondary" href="{% url 'ledger:obligation_detail' obligation.id %}">Back to obligation</a>
+    </div>
+</div>
+
+{% include "ledger/partials/history_tables.html" %}
+{% endblock %}

@@ -6,12 +6,13 @@
 <div class="page-title">
     <div>
         <h1>{{ obligation.title }} history</h1>
-        <div class="muted">Full ledger entries, financial events, and interest runs.</div>
+        <div class="muted">Full activity history in plain language.</div>
     </div>
     <div class="actions">
         <a class="button secondary" href="{% url 'ledger:obligation_detail' obligation.id %}">Back to obligation</a>
+        <a class="button secondary" href="{% url 'ledger:obligation_accounting_history' obligation.id %}">Accounting ledger</a>
     </div>
 </div>
 
-{% include "ledger/partials/history_tables.html" %}
+{% include "ledger/partials/activity_table.html" %}
 {% endblock %}

@@ -17,6 +17,15 @@ def money_units(value):
 
 
 @register.filter
+def signed_money_units(value):
+    if value is None:
+        value = 0
+    sign = '+' if value >= 0 else '-'
+    amount = decimal_from_units(abs(value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return f'{sign}${amount:,.2f}'
+
+
+@register.filter
 def user_label(user):
     if user is None:
         return ''
