@@ -36,6 +36,8 @@ $10.0000 = 100000 units
 
 Percentages and interest calculations use `Decimal`; posted ledger amounts are rounded into integer units.
 
+User-facing forms and pages display normal currency with 2 decimal places. The 4-decimal unit precision is a backend accounting detail only.
+
 ## Domain Entities
 
 ### User

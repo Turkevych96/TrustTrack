@@ -13,9 +13,9 @@ class MoneyForm(forms.Form):
     amount = forms.DecimalField(
         label='Amount',
         max_digits=18,
-        decimal_places=4,
-        min_value=Decimal('0.0001'),
-        widget=forms.NumberInput(attrs={'step': '0.0001', 'min': '0.0001'}),
+        decimal_places=2,
+        min_value=Decimal('0.01'),
+        widget=forms.NumberInput(attrs={'step': '0.01', 'min': '0.01'}),
     )
 
     @property

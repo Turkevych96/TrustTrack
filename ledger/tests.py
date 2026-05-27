@@ -19,6 +19,7 @@ from ledger.services.balances import get_obligation_balance
 from ledger.services.events import ensure_obligation_accounts, post_principal_advance, post_repayment
 from ledger.services.interest import calculate_monthly_interest, post_monthly_interest
 from ledger.services.recurring import generate_recurring_events_for_month
+from ledger.templatetags.money import money_units
 
 
 class LedgerTestCase(TestCase):
@@ -57,6 +58,10 @@ class ModelRuleTests(LedgerTestCase):
 
         with self.assertRaises(ValidationError):
             obligation.full_clean()
+
+    def test_money_display_uses_two_decimals(self):
+        self.assertEqual(money_units(1_000_000), '$100.00')
+        self.assertEqual(money_units(1_000_055), '$100.01')
 
     def test_unbalanced_transaction_cannot_post(self):
         receivable, _ = ensure_obligation_accounts(self.obligation)
@@ -278,7 +283,7 @@ class ViewTests(LedgerTestCase):
                 'title': 'Hardware',
                 'category': 'Equipment',
                 'opened_on': '2026-02-01',
-                'amount': '100.0000',
+                'amount': '100.00',
                 'memo': 'Laptop',
             },
         )
@@ -297,7 +302,7 @@ class ViewTests(LedgerTestCase):
             reverse('ledger:repayment_create', kwargs={'pk': self.obligation.pk}),
             {
                 'event_date': '2026-01-10',
-                'amount': '125.0000',
+                'amount': '125.00',
                 'memo': 'Too much',
             },
         )
@@ -316,7 +321,7 @@ class ViewTests(LedgerTestCase):
                 'day_of_month': 1,
                 'starts_on': '2026-03-01',
                 'ends_on': '',
-                'amount': '1000.0000',
+                'amount': '1000.00',
                 'memo': 'Monthly rent',
             },
         )
