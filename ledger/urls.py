@@ -12,5 +12,7 @@ urlpatterns = [
     path('obligations/<int:pk>/', views.obligation_detail, name='obligation_detail'),
     path('obligations/<int:pk>/repay/', views.repayment_create, name='repayment_create'),
     path('obligations/<int:pk>/charges/new/', views.recurring_charge_create, name='recurring_charge_create'),
+    path('obligations/<int:pk>/charges/generate-due/', views.recurring_due_generate, name='recurring_due_generate'),
     path('obligations/<int:pk>/rates/new/', views.interest_rate_create, name='interest_rate_create'),
+    path('obligations/<int:pk>/close/', views.obligation_close, name='obligation_close'),
 ]

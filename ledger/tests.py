@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.utils import timezone
 from django.urls import reverse
 
 from ledger.models import (
@@ -18,7 +19,7 @@ from ledger.models import (
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import ensure_obligation_accounts, post_principal_advance, post_repayment
 from ledger.services.interest import calculate_monthly_interest, post_monthly_interest
-from ledger.services.recurring import generate_recurring_events_for_month
+from ledger.services.recurring import generate_due_recurring_events, generate_recurring_events_for_month
 from ledger.templatetags.money import money_units
 
 
@@ -178,6 +179,55 @@ class RecurringTests(LedgerTestCase):
 
         self.assertEqual(len(transactions), 1)
         self.assertEqual(transactions[0].financial_event.amount_units, 11_000_000)
+
+    def test_generate_due_recurring_events_backfills_without_duplicates(self):
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Rent',
+            day_of_month=1,
+            starts_on=date(2024, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=10_000_000,
+            valid_from=date(2024, 1, 1),
+        )
+
+        first_run = generate_due_recurring_events(
+            obligation=self.obligation,
+            through_date=date(2024, 4, 15),
+        )
+        second_run = generate_due_recurring_events(
+            obligation=self.obligation,
+            through_date=date(2024, 4, 15),
+        )
+
+        self.assertEqual(len(first_run), 4)
+        self.assertEqual(len(second_run), 0)
+        self.assertEqual(get_obligation_balance(self.obligation), 40_000_000)
+
+    def test_closed_obligation_does_not_generate_due_recurring_events(self):
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Rent',
+            day_of_month=1,
+            starts_on=date(2024, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=10_000_000,
+            valid_from=date(2024, 1, 1),
+        )
+        self.obligation.status = Obligation.Status.CLOSED
+        self.obligation.closed_on = date(2024, 1, 15)
+        self.obligation.save()
+
+        transactions = generate_due_recurring_events(
+            obligation=self.obligation,
+            through_date=date(2024, 4, 15),
+        )
+
+        self.assertEqual(transactions, [])
 
 
 class InterestTests(LedgerTestCase):
@@ -347,3 +397,44 @@ class ViewTests(LedgerTestCase):
         self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
         rate = InterestRatePeriod.objects.get(obligation=self.obligation)
         self.assertEqual(rate.annual_rate_percent, Decimal('7.2500'))
+
+    def test_generate_due_charges_view_posts_due_recurring_events(self):
+        current_month = timezone.localdate().replace(day=1)
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Rent',
+            day_of_month=1,
+            starts_on=current_month,
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=10_000_000,
+            valid_from=current_month,
+        )
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(reverse('ledger:recurring_due_generate', kwargs={'pk': self.obligation.pk}))
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        self.assertEqual(get_obligation_balance(self.obligation), 10_000_000)
+
+    def test_close_obligation_view_stops_tracking_without_deleting_history(self):
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Rent',
+            day_of_month=1,
+            starts_on=date(2026, 1, 1),
+        )
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(reverse('ledger:obligation_close', kwargs={'pk': self.obligation.pk}))
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        self.obligation.refresh_from_db()
+        series.refresh_from_db()
+        self.assertEqual(self.obligation.status, Obligation.Status.CLOSED)
+        self.assertEqual(self.obligation.closed_on, timezone.localdate())
+        self.assertFalse(series.active)
+        self.assertEqual(series.ends_on, timezone.localdate())
+        self.assertEqual(self.obligation.ledger_transactions.count(), 1)

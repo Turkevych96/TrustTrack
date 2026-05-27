@@ -1,11 +1,13 @@
 from calendar import monthrange
 from datetime import date
 
-from ledger.models import EventSeries, EventSeriesVersion, LedgerTransaction
+from django.utils import timezone
+
+from ledger.models import EventSeries, EventSeriesVersion, LedgerTransaction, Obligation
 from ledger.services.events import post_scheduled_charge
 
 
-def generate_recurring_events_for_month(month_start):
+def generate_recurring_events_for_month(month_start, obligation=None, through_date=None):
     period_start = month_start.replace(day=1)
     period_end = next_month_start(period_start)
     created_transactions = []
@@ -13,11 +15,16 @@ def generate_recurring_events_for_month(month_start):
     series_queryset = EventSeries.objects.filter(
         active=True,
         frequency=EventSeries.Frequency.MONTHLY,
+        obligation__status=Obligation.Status.OPEN,
         starts_on__lt=period_end,
     ).filter(models_ends_after(period_start))
+    if obligation is not None:
+        series_queryset = series_queryset.filter(obligation=obligation)
 
     for series in series_queryset.select_related('obligation'):
         occurrence_date = _occurrence_date_for_month(series.day_of_month, period_start)
+        if through_date is not None and occurrence_date > through_date:
+            continue
         if occurrence_date < series.starts_on:
             continue
         if series.ends_on and occurrence_date > series.ends_on:
@@ -45,6 +52,37 @@ def generate_recurring_events_for_month(month_start):
                 idempotency_key=idempotency_key,
             )
         )
+
+    return created_transactions
+
+
+def generate_due_recurring_events(obligation=None, through_date=None):
+    through_date = through_date or timezone.localdate()
+    series_queryset = EventSeries.objects.filter(
+        active=True,
+        frequency=EventSeries.Frequency.MONTHLY,
+        obligation__status=Obligation.Status.OPEN,
+        starts_on__lte=through_date,
+    )
+    if obligation is not None:
+        series_queryset = series_queryset.filter(obligation=obligation)
+
+    first_series = series_queryset.order_by('starts_on').first()
+    if first_series is None:
+        return []
+
+    created_transactions = []
+    current_month = first_series.starts_on.replace(day=1)
+    final_month = through_date.replace(day=1)
+    while current_month <= final_month:
+        created_transactions.extend(
+            generate_recurring_events_for_month(
+                current_month,
+                obligation=obligation,
+                through_date=through_date,
+            )
+        )
+        current_month = next_month_start(current_month)
 
     return created_transactions
 

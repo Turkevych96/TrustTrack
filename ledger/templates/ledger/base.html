@@ -177,6 +177,11 @@
             color: var(--accent-dark);
         }
         .button.secondary:hover { background: #eef5f2; }
+        .button.danger {
+            border-color: var(--danger);
+            background: var(--danger);
+        }
+        .button.danger:hover { background: #8f1d14; }
         .form-page {
             max-width: 680px;
         }
@@ -206,6 +211,17 @@
         .empty {
             color: var(--muted);
             padding: 18px;
+        }
+        .messages {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 18px;
+        }
+        .message {
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            padding: 10px 12px;
+            background: #eef5f2;
         }
         @media (max-width: 760px) {
             .nav, .page-title { flex-direction: column; align-items: stretch; }
@@ -237,6 +253,13 @@
         </nav>
     </header>
     <main class="page {% block page_class %}{% endblock %}">
+        {% if messages %}
+            <div class="messages">
+                {% for message in messages %}
+                    <div class="message">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
         {% block content %}{% endblock %}
     </main>
 </body>

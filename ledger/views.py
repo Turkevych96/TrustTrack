@@ -1,9 +1,12 @@
 from django.contrib.auth.decorators import login_required
+from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from ledger.forms import (
     CreateObligationForm,
@@ -21,6 +24,7 @@ from ledger.models import (
 )
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import post_principal_advance, post_repayment
+from ledger.services.recurring import generate_due_recurring_events
 
 
 def related_obligations(user):
@@ -215,6 +219,35 @@ def interest_rate_create(request, pk):
             'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
         },
     )
+
+
+@login_required
+@require_POST
+def recurring_due_generate(request, pk):
+    obligation = get_related_obligation(request.user, pk)
+    created_transactions = generate_due_recurring_events(obligation=obligation)
+    messages.success(request, f'Generated {len(created_transactions)} due recurring charge(s).')
+    return redirect('ledger:obligation_detail', pk=obligation.pk)
+
+
+@login_required
+@require_POST
+def obligation_close(request, pk):
+    obligation = get_related_obligation(request.user, pk)
+    closed_on = timezone.localdate()
+    with transaction.atomic():
+        obligation.status = Obligation.Status.CLOSED
+        obligation.closed_on = closed_on
+        obligation.save(update_fields=['status', 'closed_on', 'updated_at'])
+        EventSeries.objects.filter(obligation=obligation, active=True, starts_on__lte=closed_on).update(
+            active=False,
+            ends_on=closed_on,
+        )
+        EventSeries.objects.filter(obligation=obligation, active=True, starts_on__gt=closed_on).update(
+            active=False,
+        )
+    messages.success(request, 'Obligation was closed and future recurring charges were stopped.')
+    return redirect('ledger:obligation_detail', pk=obligation.pk)
 
 
 def _obligation_row(obligation, user):

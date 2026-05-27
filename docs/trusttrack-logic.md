@@ -327,6 +327,12 @@ Rules:
 4. The event creates a ledger entry that increases the obligation balance.
 5. Idempotency prevents duplicate events for the same series and month.
 
+If a recurring series starts in the past, the UI can generate all due monthly charges up to today. A blank end date means the schedule remains active until the obligation is closed or the series is stopped.
+
+### Stop Tracking
+
+Obligations and ledger transactions should not be destructively deleted in normal use. When a debt should no longer be tracked, TrustTrack closes the obligation and stops future recurring series. Existing financial events and ledger entries remain available as history.
+
 ### Recurring Amount Change
 
 1. The user changes a future monthly amount, for example rent from `$1000` to `$1100`.

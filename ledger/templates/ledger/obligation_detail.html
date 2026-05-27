@@ -8,13 +8,23 @@
     <div>
         <h1>{{ obligation.title }}</h1>
         <div class="muted">
-            {{ obligation.borrower|user_label }} owes {{ obligation.creditor|user_label }} · {{ obligation.opened_on }}
+            {{ obligation.borrower|user_label }} owes {{ obligation.creditor|user_label }} - {{ obligation.opened_on }}
         </div>
     </div>
     <div class="actions">
         <a class="button secondary" href="{% url 'ledger:repayment_create' obligation.id %}">Repayment</a>
         <a class="button secondary" href="{% url 'ledger:recurring_charge_create' obligation.id %}">Recurring charge</a>
         <a class="button secondary" href="{% url 'ledger:interest_rate_create' obligation.id %}">Interest rate</a>
+        <form method="post" action="{% url 'ledger:recurring_due_generate' obligation.id %}">
+            {% csrf_token %}
+            <button class="button secondary" type="submit">Generate due charges</button>
+        </form>
+        {% if obligation.status == "open" %}
+            <form method="post" action="{% url 'ledger:obligation_close' obligation.id %}">
+                {% csrf_token %}
+                <button class="button danger" type="submit">Stop tracking</button>
+            </form>
+        {% endif %}
     </div>
 </div>
 
