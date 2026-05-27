@@ -20,23 +20,31 @@ The system should answer five questions clearly:
 
 TrustTrack should not store a manually edited "current balance" as the source of truth.
 
-The current balance of an obligation is derived from dated ledger entries:
+The current balance of an obligation is derived from posted ledger entries:
 
 - entries that increase debt: principal advances, recurring charges, interest accruals, positive adjustments
 - entries that reduce debt: repayments, credits, negative adjustments
 
-Business events explain why ledger entries exist. Ledger entries explain how balances changed.
+Business events explain why ledger transactions exist. Ledger entries explain how balances changed.
+
+Money is stored as integer units with 4 decimal places for v1:
+
+```text
+$10.0000 = 100000 units
+1 unit = $0.0001
+```
+
+Percentages and interest calculations use `Decimal`; posted ledger amounts are rounded into integer units.
 
 ## Domain Entities
 
 ### Person
 
-Represents a trusted participant in the family ledger.
+Represents a trusted participant in the family ledger. In v1, every person must be tied to a real Django user account; TrustTrack should not create debts for imaginary people.
 
 Likely fields:
 
-- display_name
-- optional email
+- user, one-to-one with Django `AUTH_USER_MODEL`
 - optional note
 - active flag
 - timestamps
@@ -45,7 +53,13 @@ Relationships:
 
 - can be a creditor on an obligation
 - can be a borrower on an obligation
-- can appear in audit records as the actor once app users are connected to domain people
+- display name and email come from the linked Django user
+- can appear in audit records as the actor
+
+Rules:
+
+- `Person.user` is required and unique
+- if future external contacts are needed, they should be modeled explicitly as non-user counterparties with constraints instead of being silently mixed with real users
 
 ### Obligation
 
@@ -96,7 +110,7 @@ Likely fields:
 - event_type: principal_advance, repayment, scheduled_charge, interest_posting, adjustment
 - source: manual, generated, system
 - event_date
-- amount
+- amount_units
 - currency
 - direction: increases_debt, decreases_debt
 - memo
@@ -114,6 +128,40 @@ Rules:
 - a financial event can create one or more ledger entries, but the first version should create exactly one ledger entry
 - posted events should not be destructively edited; prefer voiding plus a replacement event for history
 - changing a future recurring amount should create a new series version, not rewrite historical events
+
+### Ledger Account
+
+Represents one side of an obligation in the double-entry-lite ledger.
+
+For each obligation, v1 creates:
+
+- receivable account owned by the creditor
+- payable account owned by the borrower
+
+Rules:
+
+- each obligation has one receivable account and one payable account
+- debt increases debit the receivable account and credit the payable account
+- repayments debit the payable account and credit the receivable account
+- account balances are derived from posted ledger entries
+
+### Ledger Transaction
+
+Represents one balanced accounting transaction.
+
+Examples:
+
+- initial principal advance
+- repayment
+- generated rent charge
+- monthly interest posting
+
+Rules:
+
+- transactions start as draft
+- a transaction can be posted only when debit total equals credit total
+- posted transactions are immutable
+- idempotency keys prevent duplicate generated monthly charges and interest postings
 
 ### Event Series
 
@@ -152,7 +200,7 @@ Example:
 Likely fields:
 
 - event_series
-- amount
+- amount_units
 - currency
 - valid_from
 - valid_to, nullable
@@ -175,18 +223,19 @@ Likely fields:
 - financial_event
 - entry_type: principal_advance, repayment, scheduled_charge, interest_accrual, adjustment
 - effective_date
-- amount
+- amount_units as a positive integer
+- currency, default `USD`
+- currency_exponent, default `4`
 - direction: debit_increase, credit_decrease
 - memo
 - timestamps
 
 Rules:
 
-- amount is stored as a positive `Decimal`
-- direction determines whether the entry increases or decreases debt
-- repayment entries reduce the balance
-- advances, scheduled charges, and interest accruals increase the balance
-- ledger entries are append-only by default; corrections should be modeled as reversal or adjustment entries
+- amount is stored as positive integer units, not float
+- debit and credit side determines accounting behavior
+- posted entries are immutable
+- corrections should be modeled as reversal or adjustment entries
 
 ### Interest Rate Period
 
@@ -221,7 +270,7 @@ Likely fields:
 - period_start
 - period_end
 - posted_on
-- calculated_interest_amount
+- calculated_interest_amount_units
 - ledger_entry, nullable until posted
 - status: calculated, posted, voided
 - calculation_payload, JSON for explainability
@@ -308,7 +357,8 @@ monthly_interest = sum(segment_interest for all segments in the month)
 
 Rules:
 
-- use `Decimal` for all money and percentage math
+- store posted money as integer units with 4 decimal places
+- use `Decimal` for percentage and intermediate interest math
 - do not use `float`
 - calculate interest from dated balances
 - if a repayment happens inside the month, the balance base changes from that repayment date
@@ -361,6 +411,8 @@ The first real migration should include:
 - `Person`
 - `Obligation`
 - `FinancialEvent`
+- `LedgerAccount`
+- `LedgerTransaction`
 - `EventSeries`
 - `EventSeriesVersion`
 - `LedgerEntry`
@@ -368,7 +420,7 @@ The first real migration should include:
 - `InterestAccrualRun`
 - `AuditEvent`
 
-This is enough to support one-time debts, repayments, editable recurring monthly charges, interest rate changes, monthly interest posting, and an explainable ledger.
+This is enough to support one-time debts, repayments, editable recurring monthly charges, interest rate changes, monthly interest posting, and an explainable double-entry-lite ledger.
 
 ## Initial Pages
 
@@ -453,7 +505,7 @@ Acceptance criteria:
 - tests cover partial repayments
 - tests cover rate changes
 - tests cover monthly capitalization/posting
-- tests use `Decimal` expectations
+- tests use integer-unit money expectations and `Decimal` rate expectations
 
 ### Add basic dashboard, list, and detail pages
 
@@ -526,4 +578,4 @@ Minimum scenarios before changing financial behavior:
 
 ## Current Implementation Boundary
 
-This document does not create models or migrations. It defines the implementation path so the next PR can add the `ledger` app with clear responsibilities and tests.
+The first `ledger` app foundation now exists with models, admin registration, services, migrations, and focused tests. The next implementation layer should add server-rendered forms and views on top of the service API instead of writing financial logic in views.
