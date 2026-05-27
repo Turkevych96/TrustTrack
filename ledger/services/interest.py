@@ -3,10 +3,12 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from django.db import transaction as db_transaction
+from django.db.models import Max
+from django.utils import timezone
 
-from ledger.models import FinancialEvent, InterestAccrualRun, InterestRatePeriod, LedgerTransaction
+from ledger.models import FinancialEvent, InterestAccrualRun, InterestRatePeriod, LedgerTransaction, Obligation
 from ledger.services.balances import get_obligation_balance
-from ledger.services.events import _post_debt_increase
+from ledger.services.events import _post_debt_increase, post_interest_reversal
 from ledger.services.recurring import next_month_start
 
 
@@ -56,7 +58,6 @@ def post_monthly_interest(obligation, period_start):
 
     period_start = calculation['period_start']
     period_end = calculation['period_end']
-    idempotency_key = f'interest:{obligation.pk}:{period_start.isoformat()}'
 
     with db_transaction.atomic():
         existing = InterestAccrualRun.objects.filter(
@@ -68,6 +69,8 @@ def post_monthly_interest(obligation, period_start):
         if existing:
             return existing
 
+        revision = _next_interest_revision(obligation, period_start, period_end)
+        idempotency_key = f'interest:{obligation.pk}:{period_start.isoformat()}:v{revision}'
         ledger_transaction = _post_debt_increase(
             obligation=obligation,
             amount_units=amount_units,
@@ -84,6 +87,7 @@ def post_monthly_interest(obligation, period_start):
             period_start=period_start,
             period_end=period_end,
             posted_on=period_end,
+            revision=revision,
             calculated_interest_amount_units=amount_units,
             ledger_transaction=ledger_transaction,
             status=InterestAccrualRun.Status.POSTED,
@@ -97,6 +101,100 @@ def post_monthly_interest(obligation, period_start):
         run.full_clean()
         run.save()
         return run
+
+
+def generate_due_interest(obligation, through_date=None, from_date=None):
+    through_date = through_date or timezone.localdate()
+    if obligation.status != Obligation.Status.OPEN:
+        return []
+
+    first_period_start = (from_date or obligation.opened_on).replace(day=1)
+    last_period_start = previous_month_start(through_date)
+    if first_period_start > last_period_start:
+        return []
+
+    posted_runs = []
+    for period_start in iter_month_starts(first_period_start, last_period_start):
+        if _posted_interest_run(obligation, period_start):
+            continue
+        calculation = calculate_monthly_interest(obligation, period_start)
+        if calculation['amount_units'] <= 0:
+            continue
+        posted_runs.append(post_monthly_interest(obligation, period_start))
+    return posted_runs
+
+
+def recalculate_interest_from(obligation, from_date, through_date=None):
+    through_date = through_date or timezone.localdate()
+    first_period_start = from_date.replace(day=1)
+    last_period_start = previous_month_start(through_date)
+    result = {
+        'reversed_runs': [],
+        'reversal_transactions': [],
+        'posted_runs': [],
+    }
+    if first_period_start > last_period_start:
+        return result
+
+    with db_transaction.atomic():
+        runs_to_reverse = list(
+            InterestAccrualRun.objects.select_for_update()
+            .filter(
+                obligation=obligation,
+                period_start__gte=first_period_start,
+                period_start__lte=last_period_start,
+                status=InterestAccrualRun.Status.POSTED,
+            )
+            .order_by('period_start', 'revision')
+        )
+        for run in runs_to_reverse:
+            reversal_transaction = reverse_interest_run(run)
+            result['reversed_runs'].append(run)
+            result['reversal_transactions'].append(reversal_transaction)
+
+        for period_start in iter_month_starts(first_period_start, last_period_start):
+            calculation = calculate_monthly_interest(obligation, period_start)
+            if calculation['amount_units'] <= 0:
+                continue
+            result['posted_runs'].append(post_monthly_interest(obligation, period_start))
+
+    return result
+
+
+def reverse_interest_run(run):
+    if run.status != InterestAccrualRun.Status.POSTED:
+        raise ValidationError('Only posted interest runs can be reversed.')
+
+    with db_transaction.atomic():
+        reversal_transaction = post_interest_reversal(
+            obligation=run.obligation,
+            amount_units=run.calculated_interest_amount_units,
+            event_date=run.posted_on,
+            memo=f'Reverse interest for {run.period_start.isoformat()} to {run.period_end.isoformat()}',
+            period_start=run.period_start,
+            period_end=run.period_end,
+            idempotency_key=f'interest-reversal:{run.pk}',
+        )
+        payload = dict(run.calculation_payload or {})
+        payload['voided_by_transaction_id'] = reversal_transaction.pk
+        payload['voided_reason'] = 'interest_recalculation'
+        run.status = InterestAccrualRun.Status.VOIDED
+        run.calculation_payload = payload
+        run.save(update_fields=['status', 'calculation_payload', 'updated_at'])
+        return reversal_transaction
+
+
+def iter_month_starts(first_period_start, last_period_start):
+    current = first_period_start.replace(day=1)
+    last_period_start = last_period_start.replace(day=1)
+    while current <= last_period_start:
+        yield current
+        current = next_month_start(current)
+
+
+def previous_month_start(target_date):
+    first_day_this_month = target_date.replace(day=1)
+    return (first_day_this_month - timedelta(days=1)).replace(day=1)
 
 
 def _rate_for_date(obligation, target_date):
@@ -118,3 +216,24 @@ def _rate_valid_after(target_date):
     from django.db.models import Q
 
     return Q(effective_to__isnull=True) | Q(effective_to__gte=target_date)
+
+
+def _posted_interest_run(obligation, period_start):
+    return InterestAccrualRun.objects.filter(
+        obligation=obligation,
+        period_start=period_start.replace(day=1),
+        status=InterestAccrualRun.Status.POSTED,
+    ).first()
+
+
+def _next_interest_revision(obligation, period_start, period_end):
+    max_revision = (
+        InterestAccrualRun.objects.filter(
+            obligation=obligation,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        .aggregate(max_revision=Max('revision'))
+        .get('max_revision')
+    )
+    return (max_revision or 0) + 1

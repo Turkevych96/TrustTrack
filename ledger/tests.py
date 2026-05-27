@@ -11,6 +11,7 @@ from ledger.models import (
     EventSeries,
     EventSeriesVersion,
     FinancialEvent,
+    InterestAccrualRun,
     InterestRatePeriod,
     LedgerEntry,
     LedgerTransaction,
@@ -18,7 +19,12 @@ from ledger.models import (
 )
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import ensure_obligation_accounts, post_principal_advance, post_repayment
-from ledger.services.interest import calculate_monthly_interest, post_monthly_interest
+from ledger.services.interest import (
+    calculate_monthly_interest,
+    generate_due_interest,
+    post_monthly_interest,
+    recalculate_interest_from,
+)
 from ledger.services.recurring import generate_due_recurring_events, generate_recurring_events_for_month
 from ledger.templatetags.money import money_units
 
@@ -295,6 +301,57 @@ class InterestTests(LedgerTestCase):
         self.assertEqual(ledger_transaction.status, LedgerTransaction.Status.POSTED)
         self.assertEqual(debit_total, credit_total)
 
+    def test_generate_due_interest_posts_completed_months_once(self):
+        post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
+        InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('10.0000'),
+            effective_from=date(2026, 1, 1),
+        )
+
+        first_run = generate_due_interest(self.obligation, through_date=date(2026, 4, 15))
+        second_run = generate_due_interest(self.obligation, through_date=date(2026, 4, 15))
+
+        self.assertEqual(len(first_run), 3)
+        self.assertEqual(len(second_run), 0)
+        self.assertEqual([run.period_start for run in first_run], [
+            date(2026, 1, 1),
+            date(2026, 2, 1),
+            date(2026, 3, 1),
+        ])
+
+    def test_recalculate_interest_reverses_old_runs_and_posts_new_revisions(self):
+        post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
+        InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('10.0000'),
+            effective_from=date(2026, 1, 1),
+        )
+        original_january = post_monthly_interest(self.obligation, date(2026, 1, 1))
+        original_february = post_monthly_interest(self.obligation, date(2026, 2, 1))
+        old_balance = get_obligation_balance(self.obligation)
+
+        post_repayment(self.obligation, amount_units=1_825_000, event_date=date(2026, 1, 16))
+        result = recalculate_interest_from(
+            self.obligation,
+            from_date=date(2026, 1, 16),
+            through_date=date(2026, 3, 15),
+        )
+
+        original_january.refresh_from_db()
+        original_february.refresh_from_db()
+        posted_runs = InterestAccrualRun.objects.filter(
+            obligation=self.obligation,
+            status=InterestAccrualRun.Status.POSTED,
+        ).order_by('period_start')
+
+        self.assertEqual(original_january.status, InterestAccrualRun.Status.VOIDED)
+        self.assertEqual(original_february.status, InterestAccrualRun.Status.VOIDED)
+        self.assertEqual(len(result['reversal_transactions']), 2)
+        self.assertEqual([run.revision for run in posted_runs], [2, 2])
+        self.assertEqual([run.calculated_interest_amount_units for run in posted_runs], [23_000, 14_176])
+        self.assertLess(get_obligation_balance(self.obligation), old_balance)
+
 
 class ViewTests(LedgerTestCase):
     def test_anonymous_user_redirects_to_login(self):
@@ -397,6 +454,53 @@ class ViewTests(LedgerTestCase):
         self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
         rate = InterestRatePeriod.objects.get(obligation=self.obligation)
         self.assertEqual(rate.annual_rate_percent, Decimal('7.2500'))
+
+    def test_generate_due_interest_view_posts_interest_runs(self):
+        post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
+        InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('10.0000'),
+            effective_from=date(2026, 1, 1),
+        )
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(reverse('ledger:interest_due_generate', kwargs={'pk': self.obligation.pk}))
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        self.assertTrue(
+            InterestAccrualRun.objects.filter(
+                obligation=self.obligation,
+                status=InterestAccrualRun.Status.POSTED,
+            ).exists()
+        )
+
+    def test_recalculate_interest_view_voids_and_regenerates_interest(self):
+        post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
+        InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('10.0000'),
+            effective_from=date(2026, 1, 1),
+        )
+        old_run = post_monthly_interest(self.obligation, date(2026, 1, 1))
+        post_repayment(self.obligation, amount_units=1_825_000, event_date=date(2026, 1, 16))
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(
+            reverse('ledger:interest_recalculate', kwargs={'pk': self.obligation.pk}),
+            {'from_date': '2026-01-16'},
+        )
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        old_run.refresh_from_db()
+        self.assertEqual(old_run.status, InterestAccrualRun.Status.VOIDED)
+        self.assertTrue(
+            InterestAccrualRun.objects.filter(
+                obligation=self.obligation,
+                period_start=date(2026, 1, 1),
+                revision=2,
+                status=InterestAccrualRun.Status.POSTED,
+            ).exists()
+        )
 
     def test_generate_due_charges_view_posts_due_recurring_events(self):
         current_month = timezone.localdate().replace(day=1)

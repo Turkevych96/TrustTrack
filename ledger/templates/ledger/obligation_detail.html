@@ -15,9 +15,14 @@
         <a class="button secondary" href="{% url 'ledger:repayment_create' obligation.id %}">Repayment</a>
         <a class="button secondary" href="{% url 'ledger:recurring_charge_create' obligation.id %}">Recurring charge</a>
         <a class="button secondary" href="{% url 'ledger:interest_rate_create' obligation.id %}">Interest rate</a>
+        <a class="button secondary" href="{% url 'ledger:interest_recalculate' obligation.id %}">Recalculate interest</a>
         <form method="post" action="{% url 'ledger:recurring_due_generate' obligation.id %}">
             {% csrf_token %}
             <button class="button secondary" type="submit">Generate due charges</button>
+        </form>
+        <form method="post" action="{% url 'ledger:interest_due_generate' obligation.id %}">
+            {% csrf_token %}
+            <button class="button secondary" type="submit">Generate due interest</button>
         </form>
         {% if obligation.status == "open" %}
             <form method="post" action="{% url 'ledger:obligation_close' obligation.id %}">
@@ -150,6 +155,36 @@
                 </tbody>
             </table>
         </div>
+    </div>
+</section>
+
+<section class="section-gap">
+    <h2>Interest runs</h2>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Period</th>
+                    <th>Revision</th>
+                    <th>Status</th>
+                    <th>Posted</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in interest_runs %}
+                    <tr>
+                        <td>{{ run.period_start }} - {{ run.period_end }}</td>
+                        <td>{{ run.revision }}</td>
+                        <td>{{ run.get_status_display }}</td>
+                        <td>{{ run.posted_on }}</td>
+                        <td class="amount">{{ run.calculated_interest_amount_units|money_units }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="5" class="empty">No interest has been posted yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </section>
 {% endblock %}

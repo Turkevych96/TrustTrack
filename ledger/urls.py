@@ -14,5 +14,7 @@ urlpatterns = [
     path('obligations/<int:pk>/charges/new/', views.recurring_charge_create, name='recurring_charge_create'),
     path('obligations/<int:pk>/charges/generate-due/', views.recurring_due_generate, name='recurring_due_generate'),
     path('obligations/<int:pk>/rates/new/', views.interest_rate_create, name='interest_rate_create'),
+    path('obligations/<int:pk>/interest/generate-due/', views.interest_due_generate, name='interest_due_generate'),
+    path('obligations/<int:pk>/interest/recalculate/', views.interest_recalculate, name='interest_recalculate'),
     path('obligations/<int:pk>/close/', views.obligation_close, name='obligation_close'),
 ]

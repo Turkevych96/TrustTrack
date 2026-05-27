@@ -84,35 +84,31 @@ def post_repayment(obligation, amount_units, event_date, memo='', category='', i
     if amount_units > get_obligation_balance(obligation, as_of=event_date):
         raise ValidationError('Repayment cannot exceed the obligation balance as of the repayment date.')
 
-    with db_transaction.atomic():
-        existing = _get_existing_idempotent_transaction(idempotency_key)
-        if existing:
-            return existing
+    return _post_debt_decrease(
+        obligation=obligation,
+        amount_units=amount_units,
+        event_date=event_date,
+        event_type=FinancialEvent.EventType.REPAYMENT,
+        source=FinancialEvent.Source.MANUAL,
+        memo=memo,
+        category=category,
+        idempotency_key=idempotency_key,
+    )
 
-        receivable, payable = ensure_obligation_accounts(obligation)
-        event = _create_financial_event(
-            obligation=obligation,
-            event_type=FinancialEvent.EventType.REPAYMENT,
-            source=FinancialEvent.Source.MANUAL,
-            event_date=event_date,
-            amount_units=amount_units,
-            direction=FinancialEvent.Direction.DECREASES_DEBT,
-            memo=memo,
-            category=category,
-        )
-        ledger_transaction = _create_transaction(
-            obligation=obligation,
-            event=event,
-            transaction_type=FinancialEvent.EventType.REPAYMENT,
-            transaction_date=event_date,
-            memo=memo,
-            idempotency_key=idempotency_key,
-        )
-        _create_entry(ledger_transaction, payable, LedgerEntry.Side.DEBIT, amount_units, event_date, memo)
-        _create_entry(ledger_transaction, receivable, LedgerEntry.Side.CREDIT, amount_units, event_date, memo)
-        ledger_transaction.post()
-        _audit('repayment_posted', obligation, event, {'amount_units': amount_units})
-        return ledger_transaction
+
+def post_interest_reversal(obligation, amount_units, event_date, memo='', period_start=None, period_end=None, idempotency_key=None):
+    return _post_debt_decrease(
+        obligation=obligation,
+        amount_units=amount_units,
+        event_date=event_date,
+        event_type=FinancialEvent.EventType.ADJUSTMENT,
+        source=FinancialEvent.Source.SYSTEM,
+        memo=memo,
+        category='interest_reversal',
+        period_start=period_start,
+        period_end=period_end,
+        idempotency_key=idempotency_key,
+    )
 
 
 def _post_debt_increase(
@@ -160,6 +156,52 @@ def _post_debt_increase(
         )
         _create_entry(ledger_transaction, receivable, LedgerEntry.Side.DEBIT, amount_units, event_date, memo)
         _create_entry(ledger_transaction, payable, LedgerEntry.Side.CREDIT, amount_units, event_date, memo)
+        ledger_transaction.post()
+        _audit(f'{event_type}_posted', obligation, event, {'amount_units': amount_units})
+        return ledger_transaction
+
+
+def _post_debt_decrease(
+    obligation,
+    amount_units,
+    event_date,
+    event_type,
+    source,
+    memo='',
+    category='',
+    period_start=None,
+    period_end=None,
+    idempotency_key=None,
+):
+    _validate_postable_amount(amount_units)
+    with db_transaction.atomic():
+        existing = _get_existing_idempotent_transaction(idempotency_key)
+        if existing:
+            return existing
+
+        receivable, payable = ensure_obligation_accounts(obligation)
+        event = _create_financial_event(
+            obligation=obligation,
+            event_type=event_type,
+            source=source,
+            event_date=event_date,
+            amount_units=amount_units,
+            direction=FinancialEvent.Direction.DECREASES_DEBT,
+            memo=memo,
+            category=category,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        ledger_transaction = _create_transaction(
+            obligation=obligation,
+            event=event,
+            transaction_type=event_type,
+            transaction_date=event_date,
+            memo=memo,
+            idempotency_key=idempotency_key,
+        )
+        _create_entry(ledger_transaction, payable, LedgerEntry.Side.DEBIT, amount_units, event_date, memo)
+        _create_entry(ledger_transaction, receivable, LedgerEntry.Side.CREDIT, amount_units, event_date, memo)
         ledger_transaction.post()
         _audit(f'{event_type}_posted', obligation, event, {'amount_units': amount_units})
         return ledger_transaction

@@ -83,7 +83,7 @@ class InterestRatePeriodAdmin(admin.ModelAdmin):
 
 @admin.register(InterestAccrualRun)
 class InterestAccrualRunAdmin(admin.ModelAdmin):
-    list_display = ('obligation', 'period_start', 'period_end', 'calculated_interest_amount_units', 'status')
+    list_display = ('obligation', 'period_start', 'period_end', 'revision', 'calculated_interest_amount_units', 'status')
     list_filter = ('status',)
     search_fields = ('obligation__title',)
 

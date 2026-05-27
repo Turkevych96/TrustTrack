@@ -10,6 +10,7 @@ from django.views.decorators.http import require_POST
 
 from ledger.forms import (
     CreateObligationForm,
+    InterestRecalculateForm,
     InterestRatePeriodForm,
     RecurringChargeForm,
     RepaymentForm,
@@ -17,6 +18,7 @@ from ledger.forms import (
 from ledger.models import (
     EventSeries,
     FinancialEvent,
+    InterestAccrualRun,
     InterestRatePeriod,
     LedgerEntry,
     LedgerTransaction,
@@ -24,6 +26,7 @@ from ledger.models import (
 )
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import post_principal_advance, post_repayment
+from ledger.services.interest import generate_due_interest, recalculate_interest_from
 from ledger.services.recurring import generate_due_recurring_events
 
 
@@ -95,6 +98,10 @@ def obligation_detail(request, pk):
         'financial_events': FinancialEvent.objects.filter(obligation=obligation).order_by('-event_date'),
         'event_series': event_series,
         'interest_rates': InterestRatePeriod.objects.filter(obligation=obligation).order_by('-effective_from'),
+        'interest_runs': InterestAccrualRun.objects.filter(obligation=obligation).order_by(
+            '-period_start',
+            '-revision',
+        ),
     }
     return render(request, 'ledger/obligation_detail.html', context)
 
@@ -216,6 +223,47 @@ def interest_rate_create(request, pk):
             'title': f'New interest rate: {obligation.title}',
             'form': form,
             'submit_label': 'Save rate',
+            'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
+        },
+    )
+
+
+@login_required
+@require_POST
+def interest_due_generate(request, pk):
+    obligation = get_related_obligation(request.user, pk)
+    posted_runs = generate_due_interest(obligation=obligation)
+    messages.success(request, f'Posted {len(posted_runs)} due interest month(s).')
+    return redirect('ledger:obligation_detail', pk=obligation.pk)
+
+
+@login_required
+def interest_recalculate(request, pk):
+    obligation = get_related_obligation(request.user, pk)
+    if request.method == 'POST':
+        form = InterestRecalculateForm(request.POST)
+        if form.is_valid():
+            try:
+                result = recalculate_interest_from(obligation, form.cleaned_data['from_date'])
+                messages.success(
+                    request,
+                    (
+                        f"Reversed {len(result['reversed_runs'])} old interest month(s) and "
+                        f"posted {len(result['posted_runs'])} recalculated month(s)."
+                    ),
+                )
+                return redirect('ledger:obligation_detail', pk=obligation.pk)
+            except ValidationError as error:
+                form.add_error(None, error)
+    else:
+        form = InterestRecalculateForm(initial={'from_date': obligation.opened_on})
+    return render(
+        request,
+        'ledger/form.html',
+        {
+            'title': f'Recalculate interest: {obligation.title}',
+            'form': form,
+            'submit_label': 'Recalculate interest',
             'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
         },
     )

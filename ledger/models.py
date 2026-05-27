@@ -431,6 +431,7 @@ class InterestAccrualRun(TimestampedModel):
     period_start = models.DateField()
     period_end = models.DateField()
     posted_on = models.DateField()
+    revision = models.PositiveIntegerField(default=1)
     calculated_interest_amount_units = models.BigIntegerField(default=0)
     ledger_transaction = models.OneToOneField(
         LedgerTransaction,
@@ -447,11 +448,16 @@ class InterestAccrualRun(TimestampedModel):
     calculation_payload = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        ordering = ['-period_start']
+        ordering = ['-period_start', '-revision']
         constraints = [
             models.UniqueConstraint(
+                fields=['obligation', 'period_start', 'period_end', 'revision'],
+                name='unique_interest_run_period_revision',
+            ),
+            models.UniqueConstraint(
                 fields=['obligation', 'period_start', 'period_end'],
-                name='unique_interest_run_period',
+                condition=Q(status='posted'),
+                name='unique_posted_interest_run_period',
             ),
         ]
 

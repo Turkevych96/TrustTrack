@@ -350,6 +350,20 @@ Obligations and ledger transactions should not be destructively deleted in norma
 5. A monthly interest accrual run stores the calculation details.
 6. The posted interest creates a ledger entry that increases the balance.
 
+### Interest Recalculation
+
+Posted interest should not be edited in place. If a backdated repayment or charge changes the balance for an already posted month, TrustTrack reverses the old interest posting with a separate adjustment transaction, marks the old interest run as voided, and posts a new interest run with the next revision number.
+
+Example:
+
+1. January through May interest is generated.
+2. A repayment is later recorded with an effective date in January.
+3. Recalculation starts from January.
+4. January through May posted interest runs are reversed on their original posting dates.
+5. Interest is posted again month by month using the corrected dated balance history.
+
+This keeps the ledger append-only and still gives the current balance the corrected result.
+
 ## Interest Calculation Rules
 
 TrustTrack should follow a credit-bureau-like daily interest model with monthly posting:
@@ -374,7 +388,7 @@ Rules:
 
 Day-count basis:
 
-- v1 should use the actual number of days in the calendar year for each segment date, so leap years use 366
+- v1 uses APR divided by a fixed 365-day year
 - this can become configurable later if needed
 
 Posting convention:

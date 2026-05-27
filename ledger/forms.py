@@ -125,3 +125,11 @@ class InterestRatePeriodForm(forms.ModelForm):
         period.full_clean()
         period.save()
         return period
+
+
+class InterestRecalculateForm(forms.Form):
+    from_date = forms.DateField(
+        label='Recalculate from date',
+        help_text='Interest postings from this month forward will be reversed and regenerated.',
+        widget=forms.DateInput(attrs={'type': 'date'}),
+    )
