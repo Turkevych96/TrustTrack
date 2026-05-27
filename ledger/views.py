@@ -13,6 +13,7 @@ from ledger.forms import (
     InterestRecalculateForm,
     InterestRatePeriodForm,
     RecurringChargeForm,
+    RecurringSeriesUpdateForm,
     RepaymentForm,
 )
 from ledger.models import (
@@ -96,7 +97,7 @@ def obligation_detail(request, pk):
         'role': _role_for(obligation, request.user),
         'ledger_entries': ledger_entries,
         'financial_events': FinancialEvent.objects.filter(obligation=obligation).order_by('-event_date'),
-        'event_series': event_series,
+        'event_series_rows': [_event_series_row(series) for series in event_series],
         'interest_rates': InterestRatePeriod.objects.filter(obligation=obligation).order_by('-effective_from'),
         'interest_runs': InterestAccrualRun.objects.filter(obligation=obligation).order_by(
             '-period_start',
@@ -195,9 +196,36 @@ def recurring_charge_create(request, pk):
         request,
         'ledger/form.html',
         {
-            'title': f'New recurring charge: {obligation.title}',
+            'title': f'New recurring event: {obligation.title}',
             'form': form,
-            'submit_label': 'Create recurring charge',
+            'submit_label': 'Create recurring event',
+            'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
+        },
+    )
+
+
+@login_required
+def recurring_series_update(request, pk, series_pk):
+    obligation = get_related_obligation(request.user, pk)
+    series = get_object_or_404(EventSeries, obligation=obligation, pk=series_pk)
+    if request.method == 'POST':
+        form = RecurringSeriesUpdateForm(request.POST, instance=series)
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    form.save()
+                return redirect('ledger:obligation_detail', pk=obligation.pk)
+            except ValidationError as error:
+                form.add_error(None, error)
+    else:
+        form = RecurringSeriesUpdateForm(instance=series)
+    return render(
+        request,
+        'ledger/form.html',
+        {
+            'title': f'Edit recurring event: {series.name}',
+            'form': form,
+            'submit_label': 'Save recurring event',
             'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
         },
     )
@@ -221,6 +249,32 @@ def interest_rate_create(request, pk):
         'ledger/form.html',
         {
             'title': f'New interest rate: {obligation.title}',
+            'form': form,
+            'submit_label': 'Save rate',
+            'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
+        },
+    )
+
+
+@login_required
+def interest_rate_update(request, pk, rate_pk):
+    obligation = get_related_obligation(request.user, pk)
+    rate = get_object_or_404(InterestRatePeriod, obligation=obligation, pk=rate_pk)
+    if request.method == 'POST':
+        form = InterestRatePeriodForm(request.POST, instance=rate)
+        if form.is_valid():
+            try:
+                form.save_for_obligation(obligation)
+                return redirect('ledger:obligation_detail', pk=obligation.pk)
+            except ValidationError as error:
+                form.add_error(None, error)
+    else:
+        form = InterestRatePeriodForm(instance=rate)
+    return render(
+        request,
+        'ledger/form.html',
+        {
+            'title': f'Edit interest rate: {obligation.title}',
             'form': form,
             'submit_label': 'Save rate',
             'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
@@ -273,8 +327,11 @@ def interest_recalculate(request, pk):
 @require_POST
 def recurring_due_generate(request, pk):
     obligation = get_related_obligation(request.user, pk)
-    created_transactions = generate_due_recurring_events(obligation=obligation)
-    messages.success(request, f'Generated {len(created_transactions)} due recurring charge(s).')
+    try:
+        created_transactions = generate_due_recurring_events(obligation=obligation)
+        messages.success(request, f'Generated {len(created_transactions)} due recurring event(s).')
+    except ValidationError as error:
+        messages.error(request, error.message if hasattr(error, 'message') else str(error))
     return redirect('ledger:obligation_detail', pk=obligation.pk)
 
 
@@ -305,6 +362,25 @@ def _obligation_row(obligation, user):
         'role': _role_for(obligation, user),
         'counterparty': obligation.creditor if obligation.borrower_id == user.id else obligation.borrower,
     }
+
+
+def _event_series_row(series):
+    version = _event_series_version_for_display(series)
+    return {
+        'series': series,
+        'current_amount_units': version.amount_units if version else None,
+    }
+
+
+def _event_series_version_for_display(series):
+    today = timezone.localdate()
+    return (
+        series.versions.filter(valid_from__lte=today)
+        .filter(Q(valid_to__isnull=True) | Q(valid_to__gte=today))
+        .order_by('-valid_from')
+        .first()
+        or series.versions.order_by('-valid_from').first()
+    )
 
 
 def _role_for(obligation, user):

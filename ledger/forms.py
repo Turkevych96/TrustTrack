@@ -1,11 +1,12 @@
 from decimal import Decimal
+from datetime import timedelta
 
 from django import forms
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from ledger.models import EventSeries, EventSeriesVersion, InterestRatePeriod
+from ledger.models import EventSeries, EventSeriesVersion, FinancialEvent, InterestRatePeriod
 from ledger.services.money import units_from_decimal
 
 
@@ -68,6 +69,15 @@ class RepaymentForm(MoneyForm):
 
 
 class RecurringChargeForm(MoneyForm):
+    EVENT_TYPE_CHOICES = (
+        (FinancialEvent.EventType.SCHEDULED_CHARGE, 'Monthly charge - increases debt'),
+        (FinancialEvent.EventType.REPAYMENT, 'Automatic repayment - decreases debt'),
+    )
+
+    event_type = forms.ChoiceField(
+        label='Recurring type',
+        choices=EVENT_TYPE_CHOICES,
+    )
     name = forms.CharField(max_length=160)
     day_of_month = forms.IntegerField(min_value=1, max_value=31)
     starts_on = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}))
@@ -76,7 +86,7 @@ class RecurringChargeForm(MoneyForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.order_fields(['name', 'amount', 'day_of_month', 'starts_on', 'ends_on', 'memo'])
+        self.order_fields(['event_type', 'name', 'amount', 'day_of_month', 'starts_on', 'ends_on', 'memo'])
 
     def clean(self):
         cleaned_data = super().clean()
@@ -90,6 +100,7 @@ class RecurringChargeForm(MoneyForm):
         series = EventSeries(
             obligation=obligation,
             name=self.cleaned_data['name'],
+            event_type=self.cleaned_data['event_type'],
             day_of_month=self.cleaned_data['day_of_month'],
             starts_on=self.cleaned_data['starts_on'],
             ends_on=self.cleaned_data.get('ends_on'),
@@ -107,6 +118,110 @@ class RecurringChargeForm(MoneyForm):
         version.full_clean()
         version.save()
         return series
+
+
+class RecurringSeriesUpdateForm(forms.ModelForm):
+    event_type = forms.ChoiceField(
+        label='Recurring type',
+        choices=RecurringChargeForm.EVENT_TYPE_CHOICES,
+    )
+    new_amount = forms.DecimalField(
+        label='New amount',
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal('0.01'),
+        required=False,
+        widget=forms.NumberInput(attrs={'step': '0.01', 'min': '0.01'}),
+        help_text='Leave blank to keep the current amount schedule.',
+    )
+    amount_valid_from = forms.DateField(
+        label='New amount starts on',
+        required=False,
+        widget=forms.DateInput(attrs={'type': 'date'}),
+    )
+    version_memo = forms.CharField(
+        label='New amount memo',
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+
+    class Meta:
+        model = EventSeries
+        fields = ['event_type', 'name', 'day_of_month', 'starts_on', 'ends_on', 'active', 'memo']
+        widgets = {
+            'starts_on': forms.DateInput(attrs={'type': 'date'}),
+            'ends_on': forms.DateInput(attrs={'type': 'date'}),
+            'memo': forms.Textarea(attrs={'rows': 3}),
+        }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        starts_on = cleaned_data.get('starts_on')
+        ends_on = cleaned_data.get('ends_on')
+        new_amount = cleaned_data.get('new_amount')
+        amount_valid_from = cleaned_data.get('amount_valid_from')
+        if starts_on and ends_on and ends_on < starts_on:
+            raise ValidationError('End date cannot be before start date.')
+        if new_amount and not amount_valid_from:
+            raise ValidationError('New amount start date is required when changing the amount.')
+        if amount_valid_from and starts_on and amount_valid_from < starts_on:
+            raise ValidationError('New amount start date cannot be before the schedule start date.')
+        if amount_valid_from and ends_on and amount_valid_from > ends_on:
+            raise ValidationError('New amount start date cannot be after the schedule end date.')
+        return cleaned_data
+
+    def save(self, commit=True):
+        series = super().save(commit=False)
+        series.full_clean()
+        if commit:
+            series.save()
+            self._save_amount_version(series)
+        return series
+
+    def _save_amount_version(self, series):
+        amount = self.cleaned_data.get('new_amount')
+        valid_from = self.cleaned_data.get('amount_valid_from')
+        if not amount:
+            return None
+
+        amount_units = units_from_decimal(amount)
+        next_version = (
+            EventSeriesVersion.objects.filter(event_series=series, valid_from__gt=valid_from)
+            .order_by('valid_from')
+            .first()
+        )
+        new_valid_to = next_version.valid_from - timedelta(days=1) if next_version else None
+
+        existing_version = EventSeriesVersion.objects.filter(event_series=series, valid_from=valid_from).first()
+        if existing_version:
+            existing_version.amount_units = amount_units
+            existing_version.valid_to = new_valid_to
+            existing_version.memo = self.cleaned_data.get('version_memo', '')
+            existing_version.full_clean()
+            existing_version.save()
+            return existing_version
+
+        overlapping_previous = (
+            EventSeriesVersion.objects.filter(event_series=series, valid_from__lt=valid_from)
+            .filter(models_version_valid_on_or_after(valid_from))
+            .order_by('-valid_from')
+            .first()
+        )
+        if overlapping_previous:
+            overlapping_previous.valid_to = valid_from - timedelta(days=1)
+            overlapping_previous.full_clean()
+            overlapping_previous.save()
+
+        version = EventSeriesVersion(
+            event_series=series,
+            amount_units=amount_units,
+            valid_from=valid_from,
+            valid_to=new_valid_to,
+            memo=self.cleaned_data.get('version_memo', ''),
+        )
+        version.full_clean()
+        version.save()
+        return version
 
 
 class InterestRatePeriodForm(forms.ModelForm):
@@ -133,3 +248,9 @@ class InterestRecalculateForm(forms.Form):
         help_text='Interest postings from this month forward will be reversed and regenerated.',
         widget=forms.DateInput(attrs={'type': 'date'}),
     )
+
+
+def models_version_valid_on_or_after(valid_from):
+    from django.db.models import Q
+
+    return Q(valid_to__isnull=True) | Q(valid_to__gte=valid_from)

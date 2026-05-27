@@ -79,6 +79,37 @@ def post_scheduled_charge(
     )
 
 
+def post_scheduled_repayment(
+    obligation,
+    amount_units,
+    event_date,
+    memo='',
+    category='',
+    event_series=None,
+    event_series_version=None,
+    period_start=None,
+    period_end=None,
+    idempotency_key=None,
+):
+    if amount_units > get_obligation_balance(obligation, as_of=event_date):
+        raise ValidationError('Scheduled repayment cannot exceed the obligation balance as of the repayment date.')
+
+    return _post_debt_decrease(
+        obligation=obligation,
+        amount_units=amount_units,
+        event_date=event_date,
+        event_type=FinancialEvent.EventType.REPAYMENT,
+        source=FinancialEvent.Source.GENERATED if event_series else FinancialEvent.Source.MANUAL,
+        memo=memo,
+        category=category,
+        event_series=event_series,
+        event_series_version=event_series_version,
+        period_start=period_start,
+        period_end=period_end,
+        idempotency_key=idempotency_key,
+    )
+
+
 def post_repayment(obligation, amount_units, event_date, memo='', category='', idempotency_key=None):
     _validate_postable_amount(amount_units)
     if amount_units > get_obligation_balance(obligation, as_of=event_date):
@@ -169,6 +200,8 @@ def _post_debt_decrease(
     source,
     memo='',
     category='',
+    event_series=None,
+    event_series_version=None,
     period_start=None,
     period_end=None,
     idempotency_key=None,
@@ -189,6 +222,8 @@ def _post_debt_decrease(
             direction=FinancialEvent.Direction.DECREASES_DEBT,
             memo=memo,
             category=category,
+            event_series=event_series,
+            event_series_version=event_series_version,
             period_start=period_start,
             period_end=period_end,
         )

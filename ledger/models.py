@@ -146,14 +146,25 @@ class EventSeries(TimestampedModel):
     def __str__(self):
         return f'{self.name} for {self.obligation}'
 
+    def get_event_type_display(self):
+        if self.event_type == FinancialEvent.EventType.SCHEDULED_CHARGE:
+            return 'Monthly charge'
+        if self.event_type == FinancialEvent.EventType.REPAYMENT:
+            return 'Automatic repayment'
+        return self.event_type
+
     def clean(self):
         super().clean()
         if self.day_of_month > 31:
             raise ValidationError({'day_of_month': 'Day of month must be between 1 and 31.'})
         if self.ends_on and self.ends_on < self.starts_on:
             raise ValidationError({'ends_on': 'End date cannot be before start date.'})
-        if self.event_type != FinancialEvent.EventType.SCHEDULED_CHARGE:
-            raise ValidationError({'event_type': 'Only scheduled_charge series are supported in v1.'})
+        allowed_event_types = (
+            FinancialEvent.EventType.SCHEDULED_CHARGE,
+            FinancialEvent.EventType.REPAYMENT,
+        )
+        if self.event_type not in allowed_event_types:
+            raise ValidationError({'event_type': 'Only scheduled charges and repayments are supported in v1.'})
 
 
 class EventSeriesVersion(TimestampedModel):

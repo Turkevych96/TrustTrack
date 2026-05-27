@@ -14,7 +14,7 @@
     {% if obligation.status == "open" %}
         <div class="actions">
             <a class="button secondary" href="{% url 'ledger:repayment_create' obligation.id %}">Repayment</a>
-            <a class="button secondary" href="{% url 'ledger:recurring_charge_create' obligation.id %}">Recurring charge</a>
+            <a class="button secondary" href="{% url 'ledger:recurring_charge_create' obligation.id %}">Recurring event</a>
             <a class="button secondary" href="{% url 'ledger:interest_rate_create' obligation.id %}">Interest rate</a>
             <details class="action-menu">
                 <summary class="button secondary icon-button" aria-label="Obligation settings" title="Obligation settings">
@@ -28,7 +28,7 @@
                     <a class="menu-item" href="{% url 'ledger:interest_recalculate' obligation.id %}">Recalculate interest</a>
                     <form class="menu-form" method="post" action="{% url 'ledger:recurring_due_generate' obligation.id %}">
                         {% csrf_token %}
-                        <button class="menu-item" type="submit">Generate due charges</button>
+                        <button class="menu-item" type="submit">Generate due recurring events</button>
                     </form>
                     <form class="menu-form" method="post" action="{% url 'ledger:interest_due_generate' obligation.id %}">
                         {% csrf_token %}
@@ -117,25 +117,35 @@
 
 <section class="grid two-col section-gap">
     <div>
-        <h2>Recurring charges</h2>
+        <h2>Recurring events</h2>
         <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
                         <th>Name</th>
+                        <th>Type</th>
+                        <th>Amount</th>
                         <th>Day</th>
                         <th>Active</th>
+                        {% if obligation.status == "open" %}<th></th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
-                    {% for series in event_series %}
+                    {% for row in event_series_rows %}
                         <tr>
-                            <td>{{ series.name }}</td>
-                            <td>{{ series.day_of_month }}</td>
-                            <td>{{ series.active|yesno:"Yes,No" }}</td>
+                            <td>{{ row.series.name }}</td>
+                            <td>{{ row.series.get_event_type_display|default:row.series.event_type }}</td>
+                            <td class="amount">
+                                {% if row.current_amount_units %}{{ row.current_amount_units|money_units }}{% else %}-{% endif %}
+                            </td>
+                            <td>{{ row.series.day_of_month }}</td>
+                            <td>{{ row.series.active|yesno:"Yes,No" }}</td>
+                            {% if obligation.status == "open" %}
+                                <td><a href="{% url 'ledger:recurring_series_update' obligation.id row.series.id %}">Edit</a></td>
+                            {% endif %}
                         </tr>
                     {% empty %}
-                        <tr><td colspan="3" class="empty">No recurring charges yet.</td></tr>
+                        <tr><td colspan="{% if obligation.status == "open" %}6{% else %}5{% endif %}" class="empty">No recurring events yet.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -151,6 +161,7 @@
                         <th>Rate</th>
                         <th>From</th>
                         <th>To</th>
+                        {% if obligation.status == "open" %}<th></th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -159,9 +170,12 @@
                             <td>{{ rate.annual_rate_percent }}%</td>
                             <td>{{ rate.effective_from }}</td>
                             <td>{{ rate.effective_to|default:"-" }}</td>
+                            {% if obligation.status == "open" %}
+                                <td><a href="{% url 'ledger:interest_rate_update' obligation.id rate.id %}">Edit</a></td>
+                            {% endif %}
                         </tr>
                     {% empty %}
-                        <tr><td colspan="3" class="empty">No interest rates yet.</td></tr>
+                        <tr><td colspan="{% if obligation.status == "open" %}4{% else %}3{% endif %}" class="empty">No interest rates yet.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

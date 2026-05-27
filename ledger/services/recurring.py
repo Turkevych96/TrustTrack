@@ -3,8 +3,8 @@ from datetime import date
 
 from django.utils import timezone
 
-from ledger.models import EventSeries, EventSeriesVersion, LedgerTransaction, Obligation
-from ledger.services.events import post_scheduled_charge
+from ledger.models import EventSeries, EventSeriesVersion, FinancialEvent, LedgerTransaction, Obligation
+from ledger.services.events import post_scheduled_charge, post_scheduled_repayment
 
 
 def generate_recurring_events_for_month(month_start, obligation=None, through_date=None):
@@ -38,8 +38,9 @@ def generate_recurring_events_for_month(month_start, obligation=None, through_da
         if LedgerTransaction.objects.filter(idempotency_key=idempotency_key).exists():
             continue
 
+        post_function = _post_function_for_series(series)
         created_transactions.append(
-            post_scheduled_charge(
+            post_function(
                 obligation=series.obligation,
                 amount_units=version.amount_units,
                 event_date=occurrence_date,
@@ -114,6 +115,14 @@ def _active_version(series, occurrence_date):
         .order_by('-valid_from')
         .first()
     )
+
+
+def _post_function_for_series(series):
+    if series.event_type == FinancialEvent.EventType.SCHEDULED_CHARGE:
+        return post_scheduled_charge
+    if series.event_type == FinancialEvent.EventType.REPAYMENT:
+        return post_scheduled_repayment
+    raise ValueError(f'Unsupported recurring event type: {series.event_type}')
 
 
 def models_version_valid_after(occurrence_date):

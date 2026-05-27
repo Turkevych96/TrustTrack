@@ -235,6 +235,27 @@ class RecurringTests(LedgerTestCase):
 
         self.assertEqual(transactions, [])
 
+    def test_monthly_repayment_series_reduces_debt(self):
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Direct deposit',
+            event_type=FinancialEvent.EventType.REPAYMENT,
+            day_of_month=5,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=100_000,
+            valid_from=date(2026, 1, 1),
+        )
+
+        transactions = generate_recurring_events_for_month(date(2026, 1, 1))
+
+        self.assertEqual(len(transactions), 1)
+        self.assertEqual(transactions[0].transaction_type, FinancialEvent.EventType.REPAYMENT)
+        self.assertEqual(get_obligation_balance(self.obligation), 900_000)
+
 
 class InterestTests(LedgerTestCase):
     def test_interest_uses_apr_divided_by_365(self):
@@ -384,7 +405,7 @@ class ViewTests(LedgerTestCase):
 
         self.assertContains(response, 'Repayment')
         self.assertContains(response, 'Obligation settings')
-        self.assertContains(response, 'Generate due charges')
+        self.assertContains(response, 'Generate due recurring events')
         self.assertContains(response, 'Generate due interest')
 
     def test_closed_obligation_detail_hides_active_controls(self):
@@ -399,7 +420,7 @@ class ViewTests(LedgerTestCase):
         self.assertNotContains(response, 'Repayment')
         self.assertNotContains(response, reverse('ledger:recurring_charge_create', kwargs={'pk': self.obligation.pk}))
         self.assertNotContains(response, reverse('ledger:interest_rate_create', kwargs={'pk': self.obligation.pk}))
-        self.assertNotContains(response, 'Generate due charges')
+        self.assertNotContains(response, 'Generate due recurring events')
         self.assertNotContains(response, 'Generate due interest')
         self.assertNotContains(response, 'Stop tracking')
 
@@ -450,6 +471,7 @@ class ViewTests(LedgerTestCase):
         response = self.client.post(
             reverse('ledger:recurring_charge_create', kwargs={'pk': self.obligation.pk}),
             {
+                'event_type': FinancialEvent.EventType.SCHEDULED_CHARGE,
                 'name': 'Rent',
                 'day_of_month': 1,
                 'starts_on': '2026-03-01',
@@ -463,6 +485,65 @@ class ViewTests(LedgerTestCase):
         series = EventSeries.objects.get(obligation=self.obligation, name='Rent')
         version = series.versions.get()
         self.assertEqual(version.amount_units, 10_000_000)
+
+    def test_recurring_repayment_form_creates_auto_payment_series(self):
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.post(
+            reverse('ledger:recurring_charge_create', kwargs={'pk': self.obligation.pk}),
+            {
+                'event_type': FinancialEvent.EventType.REPAYMENT,
+                'name': 'Direct deposit',
+                'day_of_month': 15,
+                'starts_on': '2026-03-01',
+                'ends_on': '',
+                'amount': '50.00',
+                'memo': 'Auto pay',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        series = EventSeries.objects.get(obligation=self.obligation, name='Direct deposit')
+        self.assertEqual(series.event_type, FinancialEvent.EventType.REPAYMENT)
+        self.assertEqual(series.versions.get().amount_units, 500_000)
+
+    def test_recurring_series_edit_updates_schedule_and_adds_future_amount_version(self):
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Rent',
+            day_of_month=1,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=10_000_000,
+            valid_from=date(2026, 1, 1),
+        )
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(
+            reverse('ledger:recurring_series_update', kwargs={'pk': self.obligation.pk, 'series_pk': series.pk}),
+            {
+                'event_type': FinancialEvent.EventType.SCHEDULED_CHARGE,
+                'name': 'Rent updated',
+                'day_of_month': 3,
+                'starts_on': '2026-01-01',
+                'ends_on': '',
+                'active': 'on',
+                'memo': 'Updated schedule',
+                'new_amount': '1100.00',
+                'amount_valid_from': '2026-07-01',
+                'version_memo': 'New rent',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        series.refresh_from_db()
+        self.assertEqual(series.name, 'Rent updated')
+        self.assertEqual(series.day_of_month, 3)
+        versions = list(series.versions.order_by('valid_from'))
+        self.assertEqual(versions[0].valid_to, date(2026, 6, 30))
+        self.assertEqual(versions[1].amount_units, 11_000_000)
 
     def test_rate_form_creates_interest_rate_period(self):
         self.client.force_login(self.creditor_user)
@@ -480,6 +561,29 @@ class ViewTests(LedgerTestCase):
         self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
         rate = InterestRatePeriod.objects.get(obligation=self.obligation)
         self.assertEqual(rate.annual_rate_percent, Decimal('7.2500'))
+
+    def test_rate_edit_updates_interest_rate_period(self):
+        rate = InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('7.2500'),
+            effective_from=date(2026, 1, 1),
+        )
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(
+            reverse('ledger:interest_rate_update', kwargs={'pk': self.obligation.pk, 'rate_pk': rate.pk}),
+            {
+                'annual_rate_percent': '8.5000',
+                'effective_from': '2026-02-01',
+                'effective_to': '',
+                'memo': 'Updated rate',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        rate.refresh_from_db()
+        self.assertEqual(rate.annual_rate_percent, Decimal('8.5000'))
+        self.assertEqual(rate.effective_from, date(2026, 2, 1))
 
     def test_generate_due_interest_view_posts_interest_runs(self):
         post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))

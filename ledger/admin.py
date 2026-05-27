@@ -64,8 +64,8 @@ class FinancialEventAdmin(admin.ModelAdmin):
 
 @admin.register(EventSeries)
 class EventSeriesAdmin(admin.ModelAdmin):
-    list_display = ('name', 'obligation', 'frequency', 'day_of_month', 'active', 'starts_on', 'ends_on')
-    list_filter = ('frequency', 'active', 'auto_post')
+    list_display = ('name', 'obligation', 'event_type', 'frequency', 'day_of_month', 'active', 'starts_on', 'ends_on')
+    list_filter = ('event_type', 'frequency', 'active', 'auto_post')
     search_fields = ('name', 'obligation__title')
 
 

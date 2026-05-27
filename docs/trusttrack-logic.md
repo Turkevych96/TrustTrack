@@ -329,6 +329,20 @@ Rules:
 
 If a recurring series starts in the past, the UI can generate all due monthly charges up to today. A blank end date means the schedule remains active until the obligation is closed or the series is stopped.
 
+### Monthly Automatic Repayment
+
+A recurring series can also represent an automatic repayment, such as a direct deposit or bank autopay.
+
+Rules:
+
+- scheduled charge series increase the debt
+- automatic repayment series decrease the debt
+- repayment series still use the same monthly schedule and versioned amount model
+- generated repayments are posted as `repayment` events with source `generated`
+- v1 keeps the same overpayment protection as manual repayments
+
+This lets a debt have both monthly charges, such as rent, and monthly repayments, such as an automatic bank withdrawal.
+
 ### Stop Tracking
 
 Obligations and ledger transactions should not be destructively deleted in normal use. When a debt should no longer be tracked, TrustTrack closes the obligation and stops future recurring series. Existing financial events and ledger entries remain available as history.
@@ -340,6 +354,8 @@ Obligations and ledger transactions should not be destructively deleted in norma
 3. TrustTrack creates a new event series version with the new amount and valid_from date.
 4. Historical generated events remain unchanged.
 5. Future generated events use the new amount.
+
+The same versioning rule applies to automatic repayment series.
 
 ### Interest Posting
 
