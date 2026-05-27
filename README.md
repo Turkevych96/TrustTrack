@@ -9,6 +9,10 @@ The project is intentionally simple: classic Django, SQLite, and server-rendered
 - **Monthly Charges:** Automatically add fixed amounts (like $625 rent) on the 1st of every month.
 - **Accurate Interest:** Calculates daily interest based on the current balance and capitalizes it monthly.
 
+## Planning
+
+- [TrustTrack Logic Map](docs/trusttrack-logic.md) defines the domain scheme, backend dependency map, calculation boundaries, and initial GitHub Projects backlog.
+
 ## Tech Stack
 
 - Python >= 3.14
