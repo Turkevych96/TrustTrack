@@ -104,6 +104,9 @@
         .two-col {
             grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         }
+        .settings-grid {
+            grid-template-columns: minmax(640px, 1.7fr) minmax(280px, 0.8fr);
+        }
         .main-side {
             grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
         }
@@ -308,9 +311,12 @@
         @media (max-width: 760px) {
             .nav, .page-title { flex-direction: column; align-items: stretch; }
             .nav-links, .nav-user { flex-wrap: wrap; }
-            .metrics, .two-col, .main-side { grid-template-columns: 1fr; }
+            .metrics, .two-col, .settings-grid, .main-side { grid-template-columns: 1fr; }
             .action-menu-panel { left: 0; right: auto; }
             th, td { white-space: normal; }
+        }
+        @media (min-width: 761px) and (max-width: 1020px) {
+            .settings-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>

@@ -59,9 +59,7 @@
     </div>
 </section>
 
-{% include "ledger/partials/history_tables.html" %}
-
-<section class="grid two-col section-gap">
+<section class="grid settings-grid section-gap">
     <div>
         <h2>Recurring events</h2>
         <div class="table-wrap">
@@ -128,5 +126,9 @@
         </div>
     </div>
 </section>
+
+<div class="section-gap">
+    {% include "ledger/partials/history_tables.html" %}
+</div>
 
 {% endblock %}
