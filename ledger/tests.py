@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.urls import reverse
 
 from ledger.models import (
     EventSeries,
@@ -13,7 +14,6 @@ from ledger.models import (
     LedgerEntry,
     LedgerTransaction,
     Obligation,
-    Person,
 )
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import ensure_obligation_accounts, post_principal_advance, post_repayment
@@ -34,25 +34,23 @@ class LedgerTestCase(TestCase):
             email='andrii@example.com',
             first_name='Andrii',
         )
-        self.creditor = Person.objects.create(user=self.creditor_user)
-        self.borrower = Person.objects.create(user=self.borrower_user)
         self.obligation = Obligation.objects.create(
-            creditor=self.creditor,
-            borrower=self.borrower,
+            creditor=self.creditor_user,
+            borrower=self.borrower_user,
             title='Test loan',
             opened_on=date(2026, 1, 1),
         )
 
 
 class ModelRuleTests(LedgerTestCase):
-    def test_person_must_be_real_user_profile(self):
-        self.assertEqual(self.creditor.user, self.creditor_user)
-        self.assertEqual(str(self.creditor), 'Alex')
+    def test_obligation_uses_real_users_directly(self):
+        self.assertEqual(self.obligation.creditor, self.creditor_user)
+        self.assertEqual(self.obligation.borrower, self.borrower_user)
 
     def test_obligation_requires_different_creditor_and_borrower(self):
         obligation = Obligation(
-            creditor=self.creditor,
-            borrower=self.creditor,
+            creditor=self.creditor_user,
+            borrower=self.creditor_user,
             title='Invalid',
             opened_on=date(2026, 1, 1),
         )
@@ -241,3 +239,106 @@ class InterestTests(LedgerTestCase):
         self.assertEqual(run.calculated_interest_amount_units, 31_000)
         self.assertEqual(ledger_transaction.status, LedgerTransaction.Status.POSTED)
         self.assertEqual(debit_total, credit_total)
+
+
+class ViewTests(LedgerTestCase):
+    def test_anonymous_user_redirects_to_login(self):
+        response = self.client.get(reverse('ledger:dashboard'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+    def test_user_sees_only_related_obligations(self):
+        user_model = get_user_model()
+        other_creditor = user_model.objects.create_user(username='casey')
+        other_borrower = user_model.objects.create_user(username='taylor')
+        Obligation.objects.create(
+            creditor=other_creditor,
+            borrower=other_borrower,
+            title='Private loan',
+            opened_on=date(2026, 1, 1),
+        )
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('ledger:obligation_list'))
+
+        self.assertContains(response, 'Test loan')
+        self.assertNotContains(response, 'Private loan')
+
+    def test_create_obligation_posts_initial_principal(self):
+        user_model = get_user_model()
+        counterparty = user_model.objects.create_user(username='maria')
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(
+            reverse('ledger:obligation_create'),
+            {
+                'role': 'lent',
+                'counterparty': counterparty.pk,
+                'title': 'Hardware',
+                'category': 'Equipment',
+                'opened_on': '2026-02-01',
+                'amount': '100.0000',
+                'memo': 'Laptop',
+            },
+        )
+
+        obligation = Obligation.objects.get(title='Hardware')
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}))
+        self.assertEqual(obligation.creditor, self.creditor_user)
+        self.assertEqual(obligation.borrower, counterparty)
+        self.assertEqual(get_obligation_balance(obligation), 1_000_000)
+
+    def test_repayment_form_rejects_overpayment(self):
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.post(
+            reverse('ledger:repayment_create', kwargs={'pk': self.obligation.pk}),
+            {
+                'event_date': '2026-01-10',
+                'amount': '125.0000',
+                'memo': 'Too much',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Repayment cannot exceed')
+        self.assertEqual(get_obligation_balance(self.obligation), 1_000_000)
+
+    def test_recurring_charge_form_creates_series_and_version(self):
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(
+            reverse('ledger:recurring_charge_create', kwargs={'pk': self.obligation.pk}),
+            {
+                'name': 'Rent',
+                'day_of_month': 1,
+                'starts_on': '2026-03-01',
+                'ends_on': '',
+                'amount': '1000.0000',
+                'memo': 'Monthly rent',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        series = EventSeries.objects.get(obligation=self.obligation, name='Rent')
+        version = series.versions.get()
+        self.assertEqual(version.amount_units, 10_000_000)
+
+    def test_rate_form_creates_interest_rate_period(self):
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(
+            reverse('ledger:interest_rate_create', kwargs={'pk': self.obligation.pk}),
+            {
+                'annual_rate_percent': '7.2500',
+                'effective_from': '2026-01-01',
+                'effective_to': '',
+                'memo': 'Initial rate',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        rate = InterestRatePeriod.objects.get(obligation=self.obligation)
+        self.assertEqual(rate.annual_rate_percent, Decimal('7.2500'))

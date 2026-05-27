@@ -1,0 +1,145 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}{{ obligation.title }} - TrustTrack{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>{{ obligation.title }}</h1>
+        <div class="muted">
+            {{ obligation.borrower|user_label }} owes {{ obligation.creditor|user_label }} · {{ obligation.opened_on }}
+        </div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'ledger:repayment_create' obligation.id %}">Repayment</a>
+        <a class="button secondary" href="{% url 'ledger:recurring_charge_create' obligation.id %}">Recurring charge</a>
+        <a class="button secondary" href="{% url 'ledger:interest_rate_create' obligation.id %}">Interest rate</a>
+    </div>
+</div>
+
+<section class="grid metrics">
+    <div class="panel">
+        <div class="metric-label">Current balance</div>
+        <div class="metric-value">{{ balance_units|money_units }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Your role</div>
+        <div class="metric-value">{{ role }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Status</div>
+        <div class="metric-value">{{ obligation.get_status_display }}</div>
+    </div>
+</section>
+
+<section class="grid two-col">
+    <div>
+        <h2>Ledger entries</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Account</th>
+                        <th>Side</th>
+                        <th>Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in ledger_entries %}
+                        <tr>
+                            <td>{{ entry.effective_date }}</td>
+                            <td>{{ entry.account.name }}</td>
+                            <td>{{ entry.get_side_display }}</td>
+                            <td class="amount">{{ entry.amount_units|money_units }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="4" class="empty">No ledger entries yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div>
+        <h2>Financial events</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in financial_events %}
+                        <tr>
+                            <td>{{ event.event_date }}</td>
+                            <td>{{ event.get_event_type_display }}</td>
+                            <td class="amount">{{ event.amount_units|money_units }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="3" class="empty">No events yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<section class="grid two-col section-gap">
+    <div>
+        <h2>Recurring charges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Day</th>
+                        <th>Active</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for series in event_series %}
+                        <tr>
+                            <td>{{ series.name }}</td>
+                            <td>{{ series.day_of_month }}</td>
+                            <td>{{ series.active|yesno:"Yes,No" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="3" class="empty">No recurring charges yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div>
+        <h2>Interest rates</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rate</th>
+                        <th>From</th>
+                        <th>To</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rate in interest_rates %}
+                        <tr>
+                            <td>{{ rate.annual_rate_percent }}%</td>
+                            <td>{{ rate.effective_from }}</td>
+                            <td>{{ rate.effective_to|default:"-" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="3" class="empty">No interest rates yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}

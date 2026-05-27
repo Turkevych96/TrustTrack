@@ -19,7 +19,7 @@ def ensure_obligation_accounts(obligation):
         obligation=obligation,
         account_type=LedgerAccount.AccountType.RECEIVABLE,
         defaults={
-            'person': obligation.creditor,
+            'user': obligation.creditor,
             'name': f'{obligation.title} receivable',
             'currency': obligation.currency,
             'currency_exponent': obligation.currency_exponent,
@@ -29,7 +29,7 @@ def ensure_obligation_accounts(obligation):
         obligation=obligation,
         account_type=LedgerAccount.AccountType.PAYABLE,
         defaults={
-            'person': obligation.borrower,
+            'user': obligation.borrower,
             'name': f'{obligation.title} payable',
             'currency': obligation.currency,
             'currency_exponent': obligation.currency_exponent,

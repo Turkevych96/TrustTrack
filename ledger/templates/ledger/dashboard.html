@@ -1,0 +1,61 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}Dashboard - TrustTrack{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Dashboard</h1>
+        <div class="muted">Open balances connected to your account.</div>
+    </div>
+    <a class="button" href="{% url 'ledger:obligation_create' %}">New obligation</a>
+</div>
+
+<section class="grid metrics">
+    <div class="panel">
+        <div class="metric-label">I owe</div>
+        <div class="metric-value negative">{{ i_owe|money_units }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Owed to me</div>
+        <div class="metric-value positive">{{ owed_to_me|money_units }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Net</div>
+        <div class="metric-value">{{ net_balance|money_units }}</div>
+    </div>
+</section>
+
+<section class="grid main-side">
+    <div>
+        <h2>Open obligations</h2>
+        {% include "ledger/partials/obligation_table.html" with rows=rows %}
+    </div>
+    <div>
+        <h2>Recent transactions</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Obligation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for transaction in recent_transactions %}
+                        <tr>
+                            <td>{{ transaction.transaction_date }}</td>
+                            <td>{{ transaction.get_transaction_type_display }}</td>
+                            <td><a href="{% url 'ledger:obligation_detail' transaction.obligation_id %}">{{ transaction.obligation.title }}</a></td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="3" class="empty">No transactions yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -11,15 +11,7 @@ from .models import (
     LedgerEntry,
     LedgerTransaction,
     Obligation,
-    Person,
 )
-
-
-@admin.register(Person)
-class PersonAdmin(admin.ModelAdmin):
-    list_display = ('user', 'display_name', 'email', 'active', 'created_at')
-    search_fields = ('user__username', 'user__email', 'user__first_name', 'user__last_name')
-    list_filter = ('active',)
 
 
 class LedgerAccountInline(admin.TabularInline):
@@ -31,15 +23,15 @@ class LedgerAccountInline(admin.TabularInline):
 class ObligationAdmin(admin.ModelAdmin):
     list_display = ('title', 'borrower', 'creditor', 'status', 'opened_on', 'currency')
     list_filter = ('status', 'currency', 'category')
-    search_fields = ('title', 'borrower__user__username', 'creditor__user__username')
+    search_fields = ('title', 'borrower__username', 'creditor__username')
     inlines = [LedgerAccountInline]
 
 
 @admin.register(LedgerAccount)
 class LedgerAccountAdmin(admin.ModelAdmin):
-    list_display = ('name', 'obligation', 'person', 'account_type', 'active')
+    list_display = ('name', 'obligation', 'user', 'account_type', 'active')
     list_filter = ('account_type', 'active')
-    search_fields = ('name', 'person__user__username', 'obligation__title')
+    search_fields = ('name', 'user__username', 'obligation__title')
 
 
 class LedgerEntryInline(admin.TabularInline):

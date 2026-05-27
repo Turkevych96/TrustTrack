@@ -1,0 +1,243 @@
+{% load money %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="data:,">
+    <title>{% block title %}TrustTrack{% endblock %}</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f7f7f4;
+            --panel: #ffffff;
+            --ink: #1f2933;
+            --muted: #68717d;
+            --line: #d8ded8;
+            --accent: #176b5b;
+            --accent-dark: #0f4d42;
+            --danger: #b42318;
+            --warn: #8a5a00;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 15px;
+            line-height: 1.45;
+        }
+        a { color: var(--accent-dark); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .app-header {
+            border-bottom: 1px solid var(--line);
+            background: var(--panel);
+        }
+        .nav {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+        .brand {
+            font-weight: 700;
+            color: var(--ink);
+            margin-right: 14px;
+        }
+        .nav-links {
+            display: flex;
+            gap: 14px;
+            flex: 1;
+        }
+        .nav-user {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--muted);
+        }
+        .link-button {
+            border: 0;
+            background: transparent;
+            color: var(--accent-dark);
+            padding: 0;
+            font: inherit;
+            cursor: pointer;
+        }
+        .page {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 28px 20px 56px;
+        }
+        .page-title {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 22px;
+        }
+        h1, h2, h3 { margin: 0; line-height: 1.2; }
+        h1 { font-size: 28px; }
+        h2 { font-size: 18px; margin-bottom: 12px; }
+        h3 { font-size: 15px; margin-bottom: 8px; }
+        .muted { color: var(--muted); }
+        .grid {
+            display: grid;
+            gap: 16px;
+        }
+        .two-col {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+        .main-side {
+            grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+        }
+        .metrics {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin-bottom: 22px;
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .section-gap {
+            margin-top: 22px;
+        }
+        .metric-label {
+            color: var(--muted);
+            font-size: 13px;
+            margin-bottom: 6px;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: 700;
+        }
+        .table-wrap {
+            overflow-x: auto;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 11px 12px;
+            border-bottom: 1px solid var(--line);
+            text-align: left;
+            vertical-align: top;
+            white-space: nowrap;
+        }
+        th {
+            color: var(--muted);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+        tr:last-child td { border-bottom: 0; }
+        .amount { font-variant-numeric: tabular-nums; font-weight: 650; }
+        .positive { color: var(--accent-dark); }
+        .negative { color: var(--danger); }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            min-height: 24px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: #fbfcfb;
+            color: var(--muted);
+            font-size: 12px;
+        }
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 36px;
+            padding: 7px 12px;
+            border-radius: 7px;
+            border: 1px solid var(--accent);
+            background: var(--accent);
+            color: white;
+            font-weight: 650;
+            cursor: pointer;
+        }
+        .button:hover { background: var(--accent-dark); text-decoration: none; }
+        .button.secondary {
+            background: var(--panel);
+            color: var(--accent-dark);
+        }
+        .button.secondary:hover { background: #eef5f2; }
+        .form-page {
+            max-width: 680px;
+        }
+        .form-grid {
+            display: grid;
+            gap: 14px;
+        }
+        label {
+            display: block;
+            font-weight: 650;
+            margin-bottom: 6px;
+        }
+        input, select, textarea {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            padding: 9px 10px;
+            font: inherit;
+            background: white;
+            color: var(--ink);
+        }
+        .field-error, .errorlist {
+            color: var(--danger);
+            margin: 6px 0 0;
+            padding-left: 18px;
+        }
+        .empty {
+            color: var(--muted);
+            padding: 18px;
+        }
+        @media (max-width: 760px) {
+            .nav, .page-title { flex-direction: column; align-items: stretch; }
+            .nav-links, .nav-user { flex-wrap: wrap; }
+            .metrics, .two-col, .main-side { grid-template-columns: 1fr; }
+            th, td { white-space: normal; }
+        }
+    </style>
+</head>
+<body>
+    <header class="app-header">
+        <nav class="nav">
+            <a class="brand" href="{% url 'ledger:dashboard' %}">TrustTrack</a>
+            {% if request.user.is_authenticated %}
+                <div class="nav-links">
+                    <a href="{% url 'ledger:dashboard' %}">Dashboard</a>
+                    <a href="{% url 'ledger:obligation_list' %}">Obligations</a>
+                    <a href="{% url 'ledger:obligation_create' %}">New obligation</a>
+                    <a href="{% url 'admin:index' %}">Admin</a>
+                </div>
+                <div class="nav-user">
+                    <span>{{ request.user|user_label }}</span>
+                    <form method="post" action="{% url 'logout' %}">
+                        {% csrf_token %}
+                        <button class="link-button" type="submit">Log out</button>
+                    </form>
+                </div>
+            {% endif %}
+        </nav>
+    </header>
+    <main class="page {% block page_class %}{% endblock %}">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

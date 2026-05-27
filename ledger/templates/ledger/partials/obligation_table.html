@@ -1,0 +1,29 @@
+{% load money %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Role</th>
+                <th>Counterparty</th>
+                <th>Balance</th>
+                <th>Status</th>
+                <th>Category</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td><a href="{% url 'ledger:obligation_detail' row.obligation.id %}">{{ row.obligation.title }}</a></td>
+                    <td><span class="badge">{{ row.role }}</span></td>
+                    <td>{{ row.counterparty|user_label }}</td>
+                    <td class="amount">{{ row.balance_units|money_units }}</td>
+                    <td>{{ row.obligation.get_status_display }}</td>
+                    <td>{{ row.obligation.category|default:"-" }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6" class="empty">No obligations yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

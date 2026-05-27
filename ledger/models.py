@@ -18,31 +18,6 @@ class TimestampedModel(models.Model):
         abstract = True
 
 
-class Person(TimestampedModel):
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='ledger_person',
-    )
-    note = models.TextField(blank=True)
-    active = models.BooleanField(default=True)
-
-    class Meta:
-        ordering = ['user_id']
-
-    def __str__(self):
-        return self.display_name
-
-    @property
-    def display_name(self):
-        full_name = self.user.get_full_name()
-        return full_name or self.user.get_username()
-
-    @property
-    def email(self):
-        return self.user.email
-
-
 class Obligation(TimestampedModel):
     class Status(models.TextChoices):
         OPEN = 'open', 'Open'
@@ -50,12 +25,12 @@ class Obligation(TimestampedModel):
         CANCELED = 'canceled', 'Canceled'
 
     creditor = models.ForeignKey(
-        Person,
+        settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name='credit_obligations',
     )
     borrower = models.ForeignKey(
-        Person,
+        settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name='debt_obligations',
     )
@@ -102,8 +77,8 @@ class LedgerAccount(TimestampedModel):
         on_delete=models.CASCADE,
         related_name='accounts',
     )
-    person = models.ForeignKey(
-        Person,
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name='ledger_accounts',
     )
@@ -129,11 +104,11 @@ class LedgerAccount(TimestampedModel):
 
     def clean(self):
         super().clean()
-        if self.obligation_id and self.person_id:
-            if self.account_type == self.AccountType.RECEIVABLE and self.person_id != self.obligation.creditor_id:
-                raise ValidationError({'person': 'Receivable account must belong to the creditor.'})
-            if self.account_type == self.AccountType.PAYABLE and self.person_id != self.obligation.borrower_id:
-                raise ValidationError({'person': 'Payable account must belong to the borrower.'})
+        if self.obligation_id and self.user_id:
+            if self.account_type == self.AccountType.RECEIVABLE and self.user_id != self.obligation.creditor_id:
+                raise ValidationError({'user': 'Receivable account must belong to the creditor.'})
+            if self.account_type == self.AccountType.PAYABLE and self.user_id != self.obligation.borrower_id:
+                raise ValidationError({'user': 'Payable account must belong to the borrower.'})
         if self.currency != DEFAULT_CURRENCY:
             raise ValidationError({'currency': 'Only USD is supported in v1.'})
         if self.currency_exponent != DEFAULT_CURRENCY_EXPONENT:

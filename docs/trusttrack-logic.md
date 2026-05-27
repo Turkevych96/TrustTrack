@@ -38,27 +38,24 @@ Percentages and interest calculations use `Decimal`; posted ledger amounts are r
 
 ## Domain Entities
 
-### Person
+### User
 
-Represents a trusted participant in the family ledger. In v1, every person must be tied to a real Django user account; TrustTrack should not create debts for imaginary people.
+Represents a trusted participant in the family ledger. In v1, participants are Django users directly; TrustTrack should not create debts for imaginary people.
 
-Likely fields:
+Source:
 
-- user, one-to-one with Django `AUTH_USER_MODEL`
-- optional note
-- active flag
-- timestamps
+- Django `AUTH_USER_MODEL`
 
 Relationships:
 
 - can be a creditor on an obligation
 - can be a borrower on an obligation
-- display name and email come from the linked Django user
 - can appear in audit records as the actor
 
 Rules:
 
-- `Person.user` is required and unique
+- obligations and ledger accounts refer directly to real users
+- users are created through Django admin in v1
 - if future external contacts are needed, they should be modeled explicitly as non-user counterparties with constraints instead of being silently mixed with real users
 
 ### Obligation
@@ -408,7 +405,7 @@ Dependency rule:
 
 The first real migration should include:
 
-- `Person`
+- Django `User`
 - `Obligation`
 - `FinancialEvent`
 - `LedgerAccount`

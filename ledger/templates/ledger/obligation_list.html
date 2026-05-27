@@ -1,0 +1,15 @@
+{% extends "ledger/base.html" %}
+
+{% block title %}Obligations - TrustTrack{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Obligations</h1>
+        <div class="muted">Debts where you are the borrower or creditor.</div>
+    </div>
+    <a class="button" href="{% url 'ledger:obligation_create' %}">New obligation</a>
+</div>
+
+{% include "ledger/partials/obligation_table.html" with rows=rows %}
+{% endblock %}

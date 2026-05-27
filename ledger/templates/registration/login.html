@@ -1,0 +1,26 @@
+{% extends "ledger/base.html" %}
+
+{% block title %}Log in - TrustTrack{% endblock %}
+{% block page_class %}form-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Log in</h1>
+        <div class="muted">Use the account created for you in Django admin.</div>
+    </div>
+</div>
+
+<form class="panel form-grid" method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+        <div>
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {{ field.errors }}
+        </div>
+    {% endfor %}
+    <button class="button" type="submit">Log in</button>
+</form>
+{% endblock %}

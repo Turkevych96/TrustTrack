@@ -1,0 +1,30 @@
+{% extends "ledger/base.html" %}
+
+{% block title %}{{ title }} - TrustTrack{% endblock %}
+{% block page_class %}form-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>{{ title }}</h1>
+        <div class="muted">Values are posted through the ledger service layer.</div>
+    </div>
+</div>
+
+<form class="panel form-grid" method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+        <div>
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="muted">{{ field.help_text }}</div>{% endif %}
+            {{ field.errors }}
+        </div>
+    {% endfor %}
+    <div class="actions">
+        <button class="button" type="submit">{{ submit_label }}</button>
+        <a class="button secondary" href="{{ back_url }}">Cancel</a>
+    </div>
+</form>
+{% endblock %}
