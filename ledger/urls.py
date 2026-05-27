@@ -10,6 +10,7 @@ urlpatterns = [
     path('obligations/', views.obligation_list, name='obligation_list'),
     path('obligations/new/', views.obligation_create, name='obligation_create'),
     path('obligations/<int:pk>/', views.obligation_detail, name='obligation_detail'),
+    path('obligations/<int:pk>/history/', views.obligation_history, name='obligation_history'),
     path('obligations/<int:pk>/repay/', views.repayment_create, name='repayment_create'),
     path('obligations/<int:pk>/charges/new/', views.recurring_charge_create, name='recurring_charge_create'),
     path('obligations/<int:pk>/charges/<int:series_pk>/edit/', views.recurring_series_update, name='recurring_series_update'),

@@ -457,6 +457,63 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'Generate due recurring events')
         self.assertContains(response, 'Generate due interest')
 
+    def test_obligation_detail_limits_noisy_history_sections(self):
+        for index in range(12):
+            post_principal_advance(
+                self.obligation,
+                amount_units=10_000,
+                event_date=date(2026, 1, index + 1),
+                memo=f'Advance {index}',
+            )
+            InterestAccrualRun.objects.create(
+                obligation=self.obligation,
+                period_start=date(2026, 2, index + 1),
+                period_end=date(2026, 2, index + 2),
+                posted_on=date(2026, 2, index + 2),
+                calculated_interest_amount_units=100,
+            )
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.get(reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+
+        self.assertEqual(len(response.context['ledger_entries']), 10)
+        self.assertEqual(response.context['ledger_entries_total'], 24)
+        self.assertTrue(response.context['ledger_entries_has_more'])
+        self.assertEqual(len(response.context['financial_events']), 10)
+        self.assertEqual(response.context['financial_events_total'], 12)
+        self.assertTrue(response.context['financial_events_has_more'])
+        self.assertEqual(len(response.context['interest_runs']), 10)
+        self.assertEqual(response.context['interest_runs_total'], 12)
+        self.assertTrue(response.context['interest_runs_has_more'])
+        self.assertContains(response, reverse('ledger:obligation_history', kwargs={'pk': self.obligation.pk}))
+
+    def test_obligation_history_shows_full_history(self):
+        for index in range(12):
+            post_principal_advance(
+                self.obligation,
+                amount_units=10_000,
+                event_date=date(2026, 1, index + 1),
+                memo=f'Advance {index}',
+            )
+            InterestAccrualRun.objects.create(
+                obligation=self.obligation,
+                period_start=date(2026, 2, index + 1),
+                period_end=date(2026, 2, index + 2),
+                posted_on=date(2026, 2, index + 2),
+                calculated_interest_amount_units=100,
+            )
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.get(reverse('ledger:obligation_history', kwargs={'pk': self.obligation.pk}))
+
+        self.assertEqual(len(response.context['ledger_entries']), 24)
+        self.assertEqual(response.context['ledger_entries_total'], 24)
+        self.assertEqual(len(response.context['financial_events']), 12)
+        self.assertEqual(response.context['financial_events_total'], 12)
+        self.assertEqual(len(response.context['interest_runs']), 12)
+        self.assertEqual(response.context['interest_runs_total'], 12)
+        self.assertContains(response, 'Full ledger entries')
+
     def test_closed_obligation_detail_hides_active_controls(self):
         self.obligation.status = Obligation.Status.CLOSED
         self.obligation.closed_on = date(2026, 1, 2)

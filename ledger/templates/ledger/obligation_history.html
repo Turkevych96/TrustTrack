@@ -1,0 +1,17 @@
+{% extends "ledger/base.html" %}
+
+{% block title %}History - {{ obligation.title }} - TrustTrack{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>{{ obligation.title }} history</h1>
+        <div class="muted">Full ledger entries, financial events, and interest runs.</div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'ledger:obligation_detail' obligation.id %}">Back to obligation</a>
+    </div>
+</div>
+
+{% include "ledger/partials/history_tables.html" %}
+{% endblock %}

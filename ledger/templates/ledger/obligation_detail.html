@@ -59,61 +59,7 @@
     </div>
 </section>
 
-<section class="grid two-col">
-    <div>
-        <h2>Ledger entries</h2>
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Account</th>
-                        <th>Side</th>
-                        <th>Amount</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for entry in ledger_entries %}
-                        <tr>
-                            <td>{{ entry.effective_date }}</td>
-                            <td>{{ entry.account.name }}</td>
-                            <td>{{ entry.get_side_display }}</td>
-                            <td class="amount">{{ entry.amount_units|money_units }}</td>
-                        </tr>
-                    {% empty %}
-                        <tr><td colspan="4" class="empty">No ledger entries yet.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <div>
-        <h2>Financial events</h2>
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Type</th>
-                        <th>Amount</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for event in financial_events %}
-                        <tr>
-                            <td>{{ event.event_date }}</td>
-                            <td>{{ event.get_event_type_display }}</td>
-                            <td class="amount">{{ event.amount_units|money_units }}</td>
-                        </tr>
-                    {% empty %}
-                        <tr><td colspan="3" class="empty">No events yet.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-</section>
+{% include "ledger/partials/history_tables.html" %}
 
 <section class="grid two-col section-gap">
     <div>
@@ -183,33 +129,4 @@
     </div>
 </section>
 
-<section class="section-gap">
-    <h2>Interest runs</h2>
-    <div class="table-wrap">
-        <table>
-            <thead>
-                <tr>
-                    <th>Period</th>
-                    <th>Revision</th>
-                    <th>Status</th>
-                    <th>Posted</th>
-                    <th>Amount</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for run in interest_runs %}
-                    <tr>
-                        <td>{{ run.period_start }} - {{ run.period_end }}</td>
-                        <td>{{ run.revision }}</td>
-                        <td>{{ run.get_status_display }}</td>
-                        <td>{{ run.posted_on }}</td>
-                        <td class="amount">{{ run.calculated_interest_amount_units|money_units }}</td>
-                    </tr>
-                {% empty %}
-                    <tr><td colspan="5" class="empty">No interest has been posted yet.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</section>
 {% endblock %}

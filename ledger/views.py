@@ -31,6 +31,9 @@ from ledger.services.interest import generate_due_interest, recalculate_interest
 from ledger.services.recurring import generate_due_recurring_events
 
 
+HISTORY_PREVIEW_LIMIT = 10
+
+
 def related_obligations(user):
     return Obligation.objects.filter(Q(creditor=user) | Q(borrower=user))
 
@@ -81,30 +84,68 @@ def obligation_list(request):
 @login_required
 def obligation_detail(request, pk):
     obligation = get_related_obligation(request.user, pk)
-    ledger_entries = (
+    ledger_entries_queryset = (
         LedgerEntry.objects.filter(account__obligation=obligation)
         .select_related('transaction', 'account')
         .order_by('-effective_date', '-created_at')
+    )
+    financial_events_queryset = FinancialEvent.objects.filter(obligation=obligation).order_by('-event_date')
+    interest_runs_queryset = InterestAccrualRun.objects.filter(obligation=obligation).order_by(
+        '-period_start',
+        '-revision',
     )
     event_series = (
         EventSeries.objects.filter(obligation=obligation)
         .prefetch_related('versions')
         .order_by('name')
     )
+    ledger_entries_total = ledger_entries_queryset.count()
+    financial_events_total = financial_events_queryset.count()
+    interest_runs_total = interest_runs_queryset.count()
     context = {
         'obligation': obligation,
         'balance_units': get_obligation_balance(obligation),
         'role': _role_for(obligation, request.user),
-        'ledger_entries': ledger_entries,
-        'financial_events': FinancialEvent.objects.filter(obligation=obligation).order_by('-event_date'),
+        'ledger_entries': ledger_entries_queryset[:HISTORY_PREVIEW_LIMIT],
+        'ledger_entries_total': ledger_entries_total,
+        'ledger_entries_has_more': ledger_entries_total > HISTORY_PREVIEW_LIMIT,
+        'financial_events': financial_events_queryset[:HISTORY_PREVIEW_LIMIT],
+        'financial_events_total': financial_events_total,
+        'financial_events_has_more': financial_events_total > HISTORY_PREVIEW_LIMIT,
         'event_series_rows': [_event_series_row(series) for series in event_series],
         'interest_rates': InterestRatePeriod.objects.filter(obligation=obligation).order_by('-effective_from'),
-        'interest_runs': InterestAccrualRun.objects.filter(obligation=obligation).order_by(
-            '-period_start',
-            '-revision',
-        ),
+        'interest_runs': interest_runs_queryset[:HISTORY_PREVIEW_LIMIT],
+        'interest_runs_total': interest_runs_total,
+        'interest_runs_has_more': interest_runs_total > HISTORY_PREVIEW_LIMIT,
+        'history_preview': True,
     }
     return render(request, 'ledger/obligation_detail.html', context)
+
+
+@login_required
+def obligation_history(request, pk):
+    obligation = get_related_obligation(request.user, pk)
+    ledger_entries = (
+        LedgerEntry.objects.filter(account__obligation=obligation)
+        .select_related('transaction', 'account')
+        .order_by('-effective_date', '-created_at')
+    )
+    financial_events = FinancialEvent.objects.filter(obligation=obligation).order_by('-event_date')
+    interest_runs = InterestAccrualRun.objects.filter(obligation=obligation).order_by('-period_start', '-revision')
+    return render(
+        request,
+        'ledger/obligation_history.html',
+        {
+            'obligation': obligation,
+            'ledger_entries': ledger_entries,
+            'ledger_entries_total': ledger_entries.count(),
+            'financial_events': financial_events,
+            'financial_events_total': financial_events.count(),
+            'interest_runs': interest_runs,
+            'interest_runs_total': interest_runs.count(),
+            'history_preview': False,
+        },
+    )
 
 
 @login_required
