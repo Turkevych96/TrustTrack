@@ -256,6 +256,55 @@ class RecurringTests(LedgerTestCase):
         self.assertEqual(transactions[0].transaction_type, FinancialEvent.EventType.REPAYMENT)
         self.assertEqual(get_obligation_balance(self.obligation), 900_000)
 
+    def test_weekly_series_generates_each_selected_weekday_in_month(self):
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Weekly service fee',
+            frequency=EventSeries.Frequency.WEEKLY,
+            day_of_week=2,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=10_000,
+            valid_from=date(2026, 1, 1),
+        )
+
+        transactions = generate_recurring_events_for_month(date(2026, 1, 1))
+
+        self.assertEqual([transaction.transaction_date for transaction in transactions], [
+            date(2026, 1, 7),
+            date(2026, 1, 14),
+            date(2026, 1, 21),
+            date(2026, 1, 28),
+        ])
+        self.assertEqual(get_obligation_balance(self.obligation), 40_000)
+
+    def test_biweekly_series_generates_every_two_weeks_from_anchor(self):
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Biweekly direct deposit',
+            event_type=FinancialEvent.EventType.REPAYMENT,
+            frequency=EventSeries.Frequency.BIWEEKLY,
+            day_of_week=4,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=100_000,
+            valid_from=date(2026, 1, 1),
+        )
+
+        transactions = generate_recurring_events_for_month(date(2026, 1, 1))
+
+        self.assertEqual([transaction.transaction_date for transaction in transactions], [
+            date(2026, 1, 2),
+            date(2026, 1, 16),
+            date(2026, 1, 30),
+        ])
+        self.assertEqual(get_obligation_balance(self.obligation), 700_000)
+
 
 class InterestTests(LedgerTestCase):
     def test_interest_uses_apr_divided_by_365(self):
@@ -473,7 +522,9 @@ class ViewTests(LedgerTestCase):
             {
                 'event_type': FinancialEvent.EventType.SCHEDULED_CHARGE,
                 'name': 'Rent',
+                'frequency': EventSeries.Frequency.MONTHLY,
                 'day_of_month': 1,
+                'day_of_week': '',
                 'starts_on': '2026-03-01',
                 'ends_on': '',
                 'amount': '1000.00',
@@ -494,7 +545,9 @@ class ViewTests(LedgerTestCase):
             {
                 'event_type': FinancialEvent.EventType.REPAYMENT,
                 'name': 'Direct deposit',
-                'day_of_month': 15,
+                'frequency': EventSeries.Frequency.BIWEEKLY,
+                'day_of_month': '',
+                'day_of_week': 4,
                 'starts_on': '2026-03-01',
                 'ends_on': '',
                 'amount': '50.00',
@@ -505,6 +558,8 @@ class ViewTests(LedgerTestCase):
         self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
         series = EventSeries.objects.get(obligation=self.obligation, name='Direct deposit')
         self.assertEqual(series.event_type, FinancialEvent.EventType.REPAYMENT)
+        self.assertEqual(series.frequency, EventSeries.Frequency.BIWEEKLY)
+        self.assertEqual(series.day_of_week, 4)
         self.assertEqual(series.versions.get().amount_units, 500_000)
 
     def test_recurring_series_edit_updates_schedule_and_adds_future_amount_version(self):
@@ -526,7 +581,9 @@ class ViewTests(LedgerTestCase):
             {
                 'event_type': FinancialEvent.EventType.SCHEDULED_CHARGE,
                 'name': 'Rent updated',
+                'frequency': EventSeries.Frequency.MONTHLY,
                 'day_of_month': 3,
+                'day_of_week': '',
                 'starts_on': '2026-01-01',
                 'ends_on': '',
                 'active': 'on',

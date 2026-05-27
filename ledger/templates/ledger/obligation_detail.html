@@ -125,7 +125,7 @@
                         <th>Name</th>
                         <th>Type</th>
                         <th>Amount</th>
-                        <th>Day</th>
+                        <th>Schedule</th>
                         <th>Active</th>
                         {% if obligation.status == "open" %}<th></th>{% endif %}
                     </tr>
@@ -138,7 +138,7 @@
                             <td class="amount">
                                 {% if row.current_amount_units %}{{ row.current_amount_units|money_units }}{% else %}-{% endif %}
                             </td>
-                            <td>{{ row.series.day_of_month }}</td>
+                            <td>{{ row.schedule_label }}</td>
                             <td>{{ row.series.active|yesno:"Yes,No" }}</td>
                             {% if obligation.status == "open" %}
                                 <td><a href="{% url 'ledger:recurring_series_update' obligation.id row.series.id %}">Edit</a></td>

@@ -15,7 +15,7 @@
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form %}
-        <div>
+        <div data-field-name="{{ field.name }}">
             <label for="{{ field.id_for_label }}">{{ field.label }}</label>
             {{ field }}
             {% if field.help_text %}<div class="muted">{{ field.help_text }}</div>{% endif %}
@@ -27,4 +27,21 @@
         <a class="button secondary" href="{{ back_url }}">Cancel</a>
     </div>
 </form>
+<script>
+    (() => {
+        const frequency = document.getElementById('id_frequency');
+        const monthField = document.querySelector('[data-field-name="day_of_month"]');
+        const weekField = document.querySelector('[data-field-name="day_of_week"]');
+        if (!frequency || !monthField || !weekField) return;
+
+        const syncScheduleFields = () => {
+            const isMonthly = frequency.value === 'monthly';
+            monthField.hidden = !isMonthly;
+            weekField.hidden = isMonthly;
+        };
+
+        frequency.addEventListener('change', syncScheduleFields);
+        syncScheduleFields();
+    })();
+</script>
 {% endblock %}

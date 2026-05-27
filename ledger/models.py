@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -118,6 +118,8 @@ class LedgerAccount(TimestampedModel):
 class EventSeries(TimestampedModel):
     class Frequency(models.TextChoices):
         MONTHLY = 'monthly', 'Monthly'
+        BIWEEKLY = 'biweekly', 'Every 2 weeks'
+        WEEKLY = 'weekly', 'Weekly'
 
     obligation = models.ForeignKey(
         Obligation,
@@ -132,7 +134,14 @@ class EventSeries(TimestampedModel):
         default=Frequency.MONTHLY,
     )
     day_of_month = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
         validators=[MinValueValidator(1)],
+    )
+    day_of_week = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(6)],
     )
     starts_on = models.DateField()
     ends_on = models.DateField(null=True, blank=True)
@@ -148,15 +157,19 @@ class EventSeries(TimestampedModel):
 
     def get_event_type_display(self):
         if self.event_type == FinancialEvent.EventType.SCHEDULED_CHARGE:
-            return 'Monthly charge'
+            return 'Scheduled charge'
         if self.event_type == FinancialEvent.EventType.REPAYMENT:
             return 'Automatic repayment'
         return self.event_type
 
     def clean(self):
         super().clean()
-        if self.day_of_month > 31:
+        if self.day_of_month and self.day_of_month > 31:
             raise ValidationError({'day_of_month': 'Day of month must be between 1 and 31.'})
+        if self.frequency == self.Frequency.MONTHLY and not self.day_of_month:
+            raise ValidationError({'day_of_month': 'Monthly schedules require a day of month.'})
+        if self.frequency in (self.Frequency.WEEKLY, self.Frequency.BIWEEKLY) and self.day_of_week is None:
+            raise ValidationError({'day_of_week': 'Weekly schedules require a day of week.'})
         if self.ends_on and self.ends_on < self.starts_on:
             raise ValidationError({'ends_on': 'End date cannot be before start date.'})
         allowed_event_types = (

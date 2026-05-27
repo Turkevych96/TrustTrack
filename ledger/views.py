@@ -191,7 +191,7 @@ def recurring_charge_create(request, pk):
             except ValidationError as error:
                 form.add_error(None, error)
     else:
-        form = RecurringChargeForm()
+        form = RecurringChargeForm(initial={'starts_on': obligation.opened_on})
     return render(
         request,
         'ledger/form.html',
@@ -243,7 +243,7 @@ def interest_rate_create(request, pk):
             except ValidationError as error:
                 form.add_error(None, error)
     else:
-        form = InterestRatePeriodForm()
+        form = InterestRatePeriodForm(initial={'effective_from': obligation.opened_on})
     return render(
         request,
         'ledger/form.html',
@@ -369,6 +369,7 @@ def _event_series_row(series):
     return {
         'series': series,
         'current_amount_units': version.amount_units if version else None,
+        'schedule_label': _event_series_schedule_label(series),
     }
 
 
@@ -381,6 +382,19 @@ def _event_series_version_for_display(series):
         .first()
         or series.versions.order_by('-valid_from').first()
     )
+
+
+def _event_series_schedule_label(series):
+    if series.frequency == EventSeries.Frequency.MONTHLY:
+        return f'{series.get_frequency_display()} on day {series.day_of_month}'
+    return f'{series.get_frequency_display()} on {_weekday_name(series.day_of_week)}'
+
+
+def _weekday_name(day_of_week):
+    names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    if day_of_week is None:
+        return '-'
+    return names[int(day_of_week)]
 
 
 def _role_for(obligation, user):

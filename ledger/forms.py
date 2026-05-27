@@ -70,8 +70,17 @@ class RepaymentForm(MoneyForm):
 
 class RecurringChargeForm(MoneyForm):
     EVENT_TYPE_CHOICES = (
-        (FinancialEvent.EventType.SCHEDULED_CHARGE, 'Monthly charge - increases debt'),
+        (FinancialEvent.EventType.SCHEDULED_CHARGE, 'Scheduled charge - increases debt'),
         (FinancialEvent.EventType.REPAYMENT, 'Automatic repayment - decreases debt'),
+    )
+    DAY_OF_WEEK_CHOICES = (
+        (0, 'Monday'),
+        (1, 'Tuesday'),
+        (2, 'Wednesday'),
+        (3, 'Thursday'),
+        (4, 'Friday'),
+        (5, 'Saturday'),
+        (6, 'Sunday'),
     )
 
     event_type = forms.ChoiceField(
@@ -79,21 +88,42 @@ class RecurringChargeForm(MoneyForm):
         choices=EVENT_TYPE_CHOICES,
     )
     name = forms.CharField(max_length=160)
-    day_of_month = forms.IntegerField(min_value=1, max_value=31)
+    frequency = forms.ChoiceField(choices=EventSeries.Frequency.choices)
+    day_of_month = forms.IntegerField(min_value=1, max_value=31, required=False)
+    day_of_week = forms.ChoiceField(choices=DAY_OF_WEEK_CHOICES, required=False)
     starts_on = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}))
     ends_on = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date'}))
     memo = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.order_fields(['event_type', 'name', 'amount', 'day_of_month', 'starts_on', 'ends_on', 'memo'])
+        self.order_fields([
+            'event_type',
+            'name',
+            'amount',
+            'frequency',
+            'day_of_month',
+            'day_of_week',
+            'starts_on',
+            'ends_on',
+            'memo',
+        ])
 
     def clean(self):
         cleaned_data = super().clean()
         starts_on = cleaned_data.get('starts_on')
         ends_on = cleaned_data.get('ends_on')
+        frequency = cleaned_data.get('frequency')
+        day_of_month = cleaned_data.get('day_of_month')
+        day_of_week = cleaned_data.get('day_of_week')
         if starts_on and ends_on and ends_on < starts_on:
             raise ValidationError('End date cannot be before start date.')
+        if frequency == EventSeries.Frequency.MONTHLY and not day_of_month:
+            raise ValidationError('Day of month is required for monthly schedules.')
+        if frequency in (EventSeries.Frequency.WEEKLY, EventSeries.Frequency.BIWEEKLY) and day_of_week in (None, ''):
+            raise ValidationError('Day of week is required for weekly schedules.')
+        if frequency in (EventSeries.Frequency.WEEKLY, EventSeries.Frequency.BIWEEKLY):
+            cleaned_data['day_of_week'] = _clean_day_of_week(day_of_week)
         return cleaned_data
 
     def save(self, obligation):
@@ -101,7 +131,9 @@ class RecurringChargeForm(MoneyForm):
             obligation=obligation,
             name=self.cleaned_data['name'],
             event_type=self.cleaned_data['event_type'],
-            day_of_month=self.cleaned_data['day_of_month'],
+            frequency=self.cleaned_data['frequency'],
+            day_of_month=self.cleaned_data.get('day_of_month') if self.cleaned_data['frequency'] == EventSeries.Frequency.MONTHLY else None,
+            day_of_week=_clean_day_of_week(self.cleaned_data.get('day_of_week')) if self.cleaned_data['frequency'] != EventSeries.Frequency.MONTHLY else None,
             starts_on=self.cleaned_data['starts_on'],
             ends_on=self.cleaned_data.get('ends_on'),
             memo=self.cleaned_data.get('memo', ''),
@@ -145,9 +177,21 @@ class RecurringSeriesUpdateForm(forms.ModelForm):
         widget=forms.Textarea(attrs={'rows': 3}),
     )
 
+    day_of_week = forms.ChoiceField(choices=RecurringChargeForm.DAY_OF_WEEK_CHOICES, required=False)
+
     class Meta:
         model = EventSeries
-        fields = ['event_type', 'name', 'day_of_month', 'starts_on', 'ends_on', 'active', 'memo']
+        fields = [
+            'event_type',
+            'name',
+            'frequency',
+            'day_of_month',
+            'day_of_week',
+            'starts_on',
+            'ends_on',
+            'active',
+            'memo',
+        ]
         widgets = {
             'starts_on': forms.DateInput(attrs={'type': 'date'}),
             'ends_on': forms.DateInput(attrs={'type': 'date'}),
@@ -160,8 +204,20 @@ class RecurringSeriesUpdateForm(forms.ModelForm):
         ends_on = cleaned_data.get('ends_on')
         new_amount = cleaned_data.get('new_amount')
         amount_valid_from = cleaned_data.get('amount_valid_from')
+        frequency = cleaned_data.get('frequency')
+        day_of_month = cleaned_data.get('day_of_month')
+        day_of_week = cleaned_data.get('day_of_week')
         if starts_on and ends_on and ends_on < starts_on:
             raise ValidationError('End date cannot be before start date.')
+        if frequency == EventSeries.Frequency.MONTHLY and not day_of_month:
+            raise ValidationError('Day of month is required for monthly schedules.')
+        if frequency in (EventSeries.Frequency.WEEKLY, EventSeries.Frequency.BIWEEKLY) and day_of_week in (None, ''):
+            raise ValidationError('Day of week is required for weekly schedules.')
+        if frequency == EventSeries.Frequency.MONTHLY:
+            cleaned_data['day_of_week'] = None
+        else:
+            cleaned_data['day_of_month'] = None
+            cleaned_data['day_of_week'] = _clean_day_of_week(day_of_week)
         if new_amount and not amount_valid_from:
             raise ValidationError('New amount start date is required when changing the amount.')
         if amount_valid_from and starts_on and amount_valid_from < starts_on:
@@ -254,3 +310,9 @@ def models_version_valid_on_or_after(valid_from):
     from django.db.models import Q
 
     return Q(valid_to__isnull=True) | Q(valid_to__gte=valid_from)
+
+
+def _clean_day_of_week(day_of_week):
+    if day_of_week in (None, ''):
+        return None
+    return int(day_of_week)

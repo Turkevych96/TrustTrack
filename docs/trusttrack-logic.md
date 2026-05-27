@@ -329,6 +329,12 @@ Rules:
 
 If a recurring series starts in the past, the UI can generate all due monthly charges up to today. A blank end date means the schedule remains active until the obligation is closed or the series is stopped.
 
+Recurring frequencies:
+
+- monthly: use the selected day of month; if a month has fewer days, use the last day of that month
+- weekly: use the selected weekday every week
+- every 2 weeks: use the selected weekday every other week, anchored from the schedule start date
+
 ### Monthly Automatic Repayment
 
 A recurring series can also represent an automatic repayment, such as a direct deposit or bank autopay.
