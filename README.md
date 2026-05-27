@@ -6,8 +6,8 @@ The project is intentionally simple: classic Django, SQLite, and server-rendered
 
 ## Core Features
 - **Obligations Tracking:** Record who owes whom and for what (e.g., Rent, Hardware).
-- **Monthly Charges:** Automatically add fixed amounts (like $625 rent) on the 1st of every month.
-- **Accurate Interest:** Calculates daily interest based on the current balance and capitalizes it monthly.
+- **Scheduled Charges:** Track one-time and recurring charges with future amount changes (for example rent moving from $1000 to $1100).
+- **Rate History & Interest:** Track changing interest rates, calculate daily interest from dated balances, and post it monthly.
 
 ## Planning
 
