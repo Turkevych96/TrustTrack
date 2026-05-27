@@ -182,6 +182,74 @@
             background: var(--danger);
         }
         .button.danger:hover { background: #8f1d14; }
+        .icon-button {
+            width: 36px;
+            padding: 7px;
+        }
+        .icon-button svg {
+            width: 18px;
+            height: 18px;
+        }
+        .action-menu {
+            position: relative;
+        }
+        .action-menu summary {
+            list-style: none;
+        }
+        .action-menu summary::-webkit-details-marker {
+            display: none;
+        }
+        .action-menu[open] summary {
+            background: #eef5f2;
+        }
+        .action-menu-panel {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 6px);
+            z-index: 20;
+            display: grid;
+            gap: 4px;
+            min-width: 220px;
+            padding: 6px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+            box-shadow: 0 12px 28px rgba(31, 41, 51, 0.12);
+        }
+        .menu-item {
+            display: block;
+            width: 100%;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--ink);
+            padding: 9px 10px;
+            font: inherit;
+            font-weight: 600;
+            text-align: left;
+            cursor: pointer;
+        }
+        .menu-item:hover {
+            background: #eef5f2;
+            text-decoration: none;
+        }
+        .menu-item.danger {
+            color: var(--danger);
+        }
+        .menu-form {
+            margin: 0;
+        }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
         .form-page {
             max-width: 680px;
         }
@@ -227,6 +295,7 @@
             .nav, .page-title { flex-direction: column; align-items: stretch; }
             .nav-links, .nav-user { flex-wrap: wrap; }
             .metrics, .two-col, .main-side { grid-template-columns: 1fr; }
+            .action-menu-panel { left: 0; right: auto; }
             th, td { white-space: normal; }
         }
     </style>

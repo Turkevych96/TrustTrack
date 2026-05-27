@@ -377,6 +377,32 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'Test loan')
         self.assertNotContains(response, 'Private loan')
 
+    def test_open_obligation_detail_keeps_maintenance_actions_in_settings_menu(self):
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.get(reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+
+        self.assertContains(response, 'Repayment')
+        self.assertContains(response, 'Obligation settings')
+        self.assertContains(response, 'Generate due charges')
+        self.assertContains(response, 'Generate due interest')
+
+    def test_closed_obligation_detail_hides_active_controls(self):
+        self.obligation.status = Obligation.Status.CLOSED
+        self.obligation.closed_on = date(2026, 1, 2)
+        self.obligation.save(update_fields=['status', 'closed_on', 'updated_at'])
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.get(reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+
+        self.assertContains(response, 'Closed')
+        self.assertNotContains(response, 'Repayment')
+        self.assertNotContains(response, reverse('ledger:recurring_charge_create', kwargs={'pk': self.obligation.pk}))
+        self.assertNotContains(response, reverse('ledger:interest_rate_create', kwargs={'pk': self.obligation.pk}))
+        self.assertNotContains(response, 'Generate due charges')
+        self.assertNotContains(response, 'Generate due interest')
+        self.assertNotContains(response, 'Stop tracking')
+
     def test_create_obligation_posts_initial_principal(self):
         user_model = get_user_model()
         counterparty = user_model.objects.create_user(username='maria')

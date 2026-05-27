@@ -11,26 +11,37 @@
             {{ obligation.borrower|user_label }} owes {{ obligation.creditor|user_label }} - {{ obligation.opened_on }}
         </div>
     </div>
-    <div class="actions">
-        <a class="button secondary" href="{% url 'ledger:repayment_create' obligation.id %}">Repayment</a>
-        <a class="button secondary" href="{% url 'ledger:recurring_charge_create' obligation.id %}">Recurring charge</a>
-        <a class="button secondary" href="{% url 'ledger:interest_rate_create' obligation.id %}">Interest rate</a>
-        <a class="button secondary" href="{% url 'ledger:interest_recalculate' obligation.id %}">Recalculate interest</a>
-        <form method="post" action="{% url 'ledger:recurring_due_generate' obligation.id %}">
-            {% csrf_token %}
-            <button class="button secondary" type="submit">Generate due charges</button>
-        </form>
-        <form method="post" action="{% url 'ledger:interest_due_generate' obligation.id %}">
-            {% csrf_token %}
-            <button class="button secondary" type="submit">Generate due interest</button>
-        </form>
-        {% if obligation.status == "open" %}
-            <form method="post" action="{% url 'ledger:obligation_close' obligation.id %}">
-                {% csrf_token %}
-                <button class="button danger" type="submit">Stop tracking</button>
-            </form>
-        {% endif %}
-    </div>
+    {% if obligation.status == "open" %}
+        <div class="actions">
+            <a class="button secondary" href="{% url 'ledger:repayment_create' obligation.id %}">Repayment</a>
+            <a class="button secondary" href="{% url 'ledger:recurring_charge_create' obligation.id %}">Recurring charge</a>
+            <a class="button secondary" href="{% url 'ledger:interest_rate_create' obligation.id %}">Interest rate</a>
+            <details class="action-menu">
+                <summary class="button secondary icon-button" aria-label="Obligation settings" title="Obligation settings">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9.7 4.3 10.6 2h2.8l.9 2.3 2.2.9 2.2-1 2 2-1 2.2.9 2.2 2.4.9v2.8l-2.4.9-.9 2.2 1 2.2-2 2-2.2-1-2.2.9-.9 2.4h-2.8l-.9-2.4-2.2-.9-2.2 1-2-2 1-2.2-.9-2.2L1 14.3v-2.8l2.4-.9.9-2.2-1-2.2 2-2 2.2 1 2.2-.9Z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    <span class="sr-only">Obligation settings</span>
+                </summary>
+                <div class="action-menu-panel">
+                    <a class="menu-item" href="{% url 'ledger:interest_recalculate' obligation.id %}">Recalculate interest</a>
+                    <form class="menu-form" method="post" action="{% url 'ledger:recurring_due_generate' obligation.id %}">
+                        {% csrf_token %}
+                        <button class="menu-item" type="submit">Generate due charges</button>
+                    </form>
+                    <form class="menu-form" method="post" action="{% url 'ledger:interest_due_generate' obligation.id %}">
+                        {% csrf_token %}
+                        <button class="menu-item" type="submit">Generate due interest</button>
+                    </form>
+                    <form class="menu-form" method="post" action="{% url 'ledger:obligation_close' obligation.id %}">
+                        {% csrf_token %}
+                        <button class="menu-item danger" type="submit">Stop tracking</button>
+                    </form>
+                </div>
+            </details>
+        </div>
+    {% endif %}
 </div>
 
 <section class="grid metrics">
