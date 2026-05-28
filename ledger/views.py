@@ -12,6 +12,8 @@ from ledger.forms import (
     CreateObligationForm,
     InterestRecalculateForm,
     InterestRatePeriodForm,
+    PayoffSimulatorForm,
+    PlannerHorizonForm,
     RecurringChargeForm,
     RecurringRecalculateForm,
     RecurringSeriesUpdateForm,
@@ -29,6 +31,7 @@ from ledger.models import (
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import post_principal_advance, post_repayment
 from ledger.services.interest import generate_due_interest, recalculate_interest_from
+from ledger.services.planner import build_portfolio_projection, simulate_monthly_payment
 from ledger.services.recurring import generate_due_recurring_events, recalculate_due_recurring_events
 
 
@@ -71,6 +74,62 @@ def dashboard(request):
             'owed_to_me': owed_to_me,
             'net_balance': owed_to_me - i_owe,
             'recent_transactions': recent_transactions,
+        },
+    )
+
+
+@login_required
+def planner(request):
+    obligations_queryset = (
+        related_obligations(request.user)
+        .filter(status=Obligation.Status.OPEN)
+        .select_related('borrower', 'creditor', 'category')
+        .order_by('title')
+    )
+    obligations = list(obligations_queryset)
+    horizon_form = PlannerHorizonForm(request.GET or None)
+    projection_months = 12
+    if horizon_form.is_valid():
+        projection_months = horizon_form.cleaned_data['projection_months']
+    else:
+        horizon_form = PlannerHorizonForm(initial={'projection_months': projection_months})
+
+    portfolio_projection = build_portfolio_projection(
+        obligations,
+        request.user,
+        months=projection_months,
+    )
+    simulator_result = None
+    simulator_form_initial = {
+        'obligation': obligations[0].pk if obligations else None,
+        'payment_day': 1,
+        'simulation_months': 60,
+    }
+    simulator_form = PayoffSimulatorForm(
+        request.GET if request.GET.get('simulate') else None,
+        obligations=obligations_queryset,
+        initial=simulator_form_initial,
+    )
+    if request.GET.get('simulate') and simulator_form.is_valid():
+        simulator_result = simulate_monthly_payment(
+            simulator_form.cleaned_data['obligation'],
+            monthly_payment_units=simulator_form.monthly_payment_units,
+            payment_day=simulator_form.cleaned_data['payment_day'],
+            months=simulator_form.cleaned_data['simulation_months'],
+        )
+
+    return render(
+        request,
+        'ledger/planner.html',
+        {
+            'horizon_form': horizon_form,
+            'simulator_form': simulator_form,
+            'simulator_result': simulator_result,
+            'portfolio_projection': portfolio_projection,
+            'planner_rows': portfolio_projection['rows'],
+            'chart_payload': _planner_chart_payload(portfolio_projection['points']),
+            'current_net_class': 'positive' if portfolio_projection['current_net_units'] >= 0 else 'negative',
+            'projected_net_class': 'positive' if portfolio_projection['projected_net_units'] >= 0 else 'negative',
         },
     )
 
@@ -525,3 +584,10 @@ def _truncate_activity_details(value, limit=50):
     if len(value) <= limit:
         return value
     return f'{value[:limit - 3]}...'
+
+
+def _planner_chart_payload(points):
+    return {
+        'labels': [point['label'] for point in points],
+        'values': [round(point['net_units'] / 10000, 2) for point in points],
+    }

@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from ledger.models import EventSeries, EventSeriesVersion, FinancialEvent, InterestRatePeriod, ObligationCategory
+from ledger.models import EventSeries, EventSeriesVersion, FinancialEvent, InterestRatePeriod, Obligation, ObligationCategory
 from ledger.services.money import units_from_decimal
 
 
@@ -72,6 +72,61 @@ class RepaymentForm(MoneyForm):
         widget=forms.DateInput(attrs={'type': 'date'}),
     )
     memo = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
+
+
+class PlannerHorizonForm(forms.Form):
+    MONTH_CHOICES = (
+        (12, '12 months'),
+        (24, '24 months'),
+        (36, '36 months'),
+        (60, '5 years'),
+    )
+
+    projection_months = forms.TypedChoiceField(
+        label='Projection',
+        choices=MONTH_CHOICES,
+        coerce=int,
+        initial=12,
+    )
+
+
+class PayoffSimulatorForm(forms.Form):
+    MONTH_CHOICES = (
+        (12, '12 months'),
+        (24, '24 months'),
+        (36, '36 months'),
+        (60, '5 years'),
+        (120, '10 years'),
+    )
+
+    obligation = forms.ModelChoiceField(queryset=Obligation.objects.none())
+    monthly_payment = forms.DecimalField(
+        label='Monthly payment',
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal('0.01'),
+        widget=forms.NumberInput(attrs={'step': '0.01', 'min': '0.01'}),
+    )
+    payment_day = forms.IntegerField(
+        label='Payment day',
+        min_value=1,
+        max_value=31,
+        initial=1,
+    )
+    simulation_months = forms.TypedChoiceField(
+        label='Simulation',
+        choices=MONTH_CHOICES,
+        coerce=int,
+        initial=60,
+    )
+
+    def __init__(self, *args, obligations, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['obligation'].queryset = obligations
+
+    @property
+    def monthly_payment_units(self):
+        return units_from_decimal(self.cleaned_data['monthly_payment'])
 
 
 class RecurringChargeForm(MoneyForm):

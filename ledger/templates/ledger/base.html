@@ -308,10 +308,49 @@
             padding: 10px 12px;
             background: #eef5f2;
         }
+        .chart-panel {
+            padding: 0;
+            overflow: hidden;
+        }
+        .chart-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 16px 16px 0;
+        }
+        .net-chart-value {
+            text-align: right;
+            font-size: 13px;
+            color: var(--muted);
+        }
+        .net-chart-value strong {
+            display: block;
+            font-size: 30px;
+            line-height: 1.1;
+        }
+        .chart-canvas-wrap {
+            position: relative;
+            width: 100%;
+            height: 360px;
+            padding: 10px 14px 18px;
+        }
+        .inline-form {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: end;
+            gap: 10px;
+        }
+        .inline-field {
+            min-width: 140px;
+        }
+        .simulator-grid {
+            grid-template-columns: minmax(300px, 0.9fr) minmax(0, 1.2fr);
+        }
         @media (max-width: 760px) {
             .nav, .page-title { flex-direction: column; align-items: stretch; }
             .nav-links, .nav-user { flex-wrap: wrap; }
-            .metrics, .two-col, .settings-grid, .main-side { grid-template-columns: 1fr; }
+            .metrics, .two-col, .settings-grid, .main-side, .simulator-grid { grid-template-columns: 1fr; }
             .action-menu-panel { left: 0; right: auto; }
             th, td { white-space: normal; }
         }
@@ -327,6 +366,7 @@
             {% if request.user.is_authenticated %}
                 <div class="nav-links">
                     <a href="{% url 'ledger:dashboard' %}">Dashboard</a>
+                    <a href="{% url 'ledger:planner' %}">Planner</a>
                     <a href="{% url 'ledger:obligation_list' %}">Obligations</a>
                     {% if request.user.is_staff %}
                         <a href="{% url 'admin:index' %}">Admin</a>
@@ -352,5 +392,6 @@
         {% endif %}
         {% block content %}{% endblock %}
     </main>
+    {% block extra_scripts %}{% endblock %}
 </body>
 </html>

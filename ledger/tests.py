@@ -27,6 +27,7 @@ from ledger.services.interest import (
     post_monthly_interest,
     recalculate_interest_from,
 )
+from ledger.services.planner import build_portfolio_projection, simulate_monthly_payment
 from ledger.services.recurring import (
     generate_due_recurring_events,
     generate_recurring_events_for_month,
@@ -517,6 +518,49 @@ class InterestTests(LedgerTestCase):
         self.assertLess(get_obligation_balance(self.obligation), old_balance)
 
 
+class PlannerTests(LedgerTestCase):
+    def test_portfolio_projection_uses_planned_recurring_repayments(self):
+        post_principal_advance(self.obligation, amount_units=3_000_000, event_date=date(2026, 1, 1))
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Monthly repayment',
+            event_type=FinancialEvent.EventType.REPAYMENT,
+            day_of_month=2,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=1_000_000,
+            valid_from=date(2026, 1, 1),
+        )
+
+        projection = build_portfolio_projection(
+            [self.obligation],
+            self.borrower_user,
+            months=3,
+            start_date=date(2026, 1, 1),
+        )
+
+        self.assertEqual(projection['points'][0]['i_owe_units'], 3_000_000)
+        self.assertEqual(projection['points'][-1]['i_owe_units'], 0)
+        self.assertEqual(projection['rows'][0]['projected_balance_units'], 0)
+        self.assertEqual(projection['rows'][0]['payoff_date'], date(2026, 3, 2))
+
+    def test_monthly_payment_simulator_estimates_payoff_date(self):
+        post_principal_advance(self.obligation, amount_units=3_000_000, event_date=date(2026, 1, 1))
+
+        simulation = simulate_monthly_payment(
+            self.obligation,
+            monthly_payment_units=1_000_000,
+            payment_day=2,
+            months=3,
+            start_date=date(2026, 1, 1),
+        )
+
+        self.assertEqual(simulation['payoff_date'], date(2026, 3, 2))
+        self.assertEqual(simulation['points'][-1]['balance_units'], 0)
+
+
 class ViewTests(LedgerTestCase):
     def test_anonymous_user_redirects_to_login(self):
         response = self.client.get(reverse('ledger:dashboard'))
@@ -547,6 +591,7 @@ class ViewTests(LedgerTestCase):
         response = self.client.get(reverse('ledger:dashboard'))
 
         self.assertContains(response, 'New obligation', count=1)
+        self.assertContains(response, reverse('ledger:planner'))
         self.assertNotContains(response, reverse('admin:index'))
         self.assertNotContains(response, 'Admin')
 
@@ -558,6 +603,42 @@ class ViewTests(LedgerTestCase):
         self.assertContains(staff_response, 'New obligation', count=1)
         self.assertContains(staff_response, reverse('admin:index'))
         self.assertContains(staff_response, 'Admin')
+
+    def test_planner_page_shows_active_obligations_and_projection(self):
+        post_principal_advance(self.obligation, amount_units=3_000_000, event_date=date(2026, 1, 1))
+        self.client.force_login(self.borrower_user)
+
+        with patch('ledger.services.planner.timezone.localdate', return_value=date(2026, 1, 1)):
+            response = self.client.get(reverse('ledger:planner'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Net projection')
+        self.assertContains(response, 'Payment simulator')
+        self.assertContains(response, 'Test loan')
+        self.assertEqual(response.context['portfolio_projection']['current_i_owe_units'], 3_000_000)
+        self.assertEqual(response.context['chart_payload']['labels'][0], 'Jan 2026')
+        self.assertEqual(response.context['chart_payload']['values'][0], -300.0)
+
+    def test_planner_simulator_calculates_monthly_payment_result(self):
+        post_principal_advance(self.obligation, amount_units=3_000_000, event_date=date(2026, 1, 1))
+        self.client.force_login(self.borrower_user)
+
+        with patch('ledger.services.planner.timezone.localdate', return_value=date(2026, 1, 1)):
+            response = self.client.get(
+                reverse('ledger:planner'),
+                {
+                    'projection_months': '12',
+                    'simulate': '1',
+                    'obligation': self.obligation.pk,
+                    'monthly_payment': '100.00',
+                    'payment_day': '2',
+                    'simulation_months': '12',
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['simulator_result']['payoff_date'], date(2026, 3, 2))
+        self.assertContains(response, '$0.00')
 
     def test_open_obligation_detail_keeps_maintenance_actions_in_settings_menu(self):
         self.client.force_login(self.creditor_user)

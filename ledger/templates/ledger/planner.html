@@ -1,0 +1,225 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}Planner - TrustTrack{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Planner</h1>
+        <div class="muted">Forecast from active obligations, planned events, and interest rates.</div>
+    </div>
+    <form class="inline-form" method="get">
+        <div class="inline-field">
+            {{ horizon_form.projection_months.label_tag }}
+            {{ horizon_form.projection_months }}
+        </div>
+        <button class="button secondary" type="submit">Apply</button>
+    </form>
+</div>
+
+<section class="panel chart-panel">
+    <div class="chart-head">
+        <div>
+            <h2>Net projection</h2>
+            <div class="muted">Below zero means you owe. Above zero means owed to you.</div>
+        </div>
+        <div class="net-chart-value">
+            Projected net
+            <strong class="{{ projected_net_class }}">{{ portfolio_projection.projected_net_units|signed_money_units }}</strong>
+            <span class="muted">Now {{ portfolio_projection.current_net_units|signed_money_units }}</span>
+        </div>
+    </div>
+    <div class="chart-canvas-wrap">
+        <canvas id="netProjectionChart"></canvas>
+    </div>
+    {{ chart_payload|json_script:"planner-chart-data" }}
+</section>
+
+<section class="section-gap">
+    <div class="section-title">
+        <h2>Active obligations</h2>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Role</th>
+                    <th>Current</th>
+                    <th>Projected</th>
+                    <th>Payoff</th>
+                    <th>Category</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in planner_rows %}
+                    <tr>
+                        <td><a href="{% url 'ledger:obligation_detail' row.obligation.id %}">{{ row.obligation.title }}</a></td>
+                        <td><span class="badge">{{ row.role }}</span></td>
+                        <td class="amount">{{ row.current_balance_units|money_units }}</td>
+                        <td class="amount">{{ row.projected_balance_units|money_units }}</td>
+                        <td>{{ row.payoff_label }}</td>
+                        <td>{{ row.obligation.category|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="6" class="empty">No active obligations yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="grid simulator-grid section-gap">
+    <div class="panel">
+        <h2>Payment simulator</h2>
+        <form class="form-grid" method="get">
+            <input type="hidden" name="projection_months" value="{{ horizon_form.projection_months.value|default:12 }}">
+            <input type="hidden" name="simulate" value="1">
+            {% for field in simulator_form %}
+                <div>
+                    {{ field.label_tag }}
+                    {{ field }}
+                    {% for error in field.errors %}
+                        <div class="field-error">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endfor %}
+            {% for error in simulator_form.non_field_errors %}
+                <div class="field-error">{{ error }}</div>
+            {% endfor %}
+            <button class="button" type="submit">Calculate</button>
+        </form>
+    </div>
+    <div class="panel">
+        <div class="section-title">
+            <h2>Simulation result</h2>
+            {% if simulator_result.payoff_date %}
+                <span class="badge">{{ simulator_result.payoff_date }}</span>
+            {% endif %}
+        </div>
+        {% if simulator_result %}
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Projected balance</th>
+                            <th>Interest</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for point in simulator_result.points %}
+                            <tr>
+                                <td>{{ point.date }}</td>
+                                <td class="amount">{{ point.balance_units|money_units }}</td>
+                                <td class="amount">{{ point.interest_units|money_units }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty">Choose an obligation and monthly payment.</div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+<script>
+(() => {
+    const dataElement = document.getElementById('planner-chart-data');
+    const canvas = document.getElementById('netProjectionChart');
+    if (!dataElement || !canvas || !window.Chart) {
+        return;
+    }
+    const payload = JSON.parse(dataElement.textContent);
+    const style = getComputedStyle(document.documentElement);
+    const positive = style.getPropertyValue('--accent-dark').trim() || '#0f4d42';
+    const negative = style.getPropertyValue('--danger').trim() || '#b42318';
+    const lineColor = (value) => value < 0 ? negative : positive;
+    const formatSignedCurrency = (value, cents = true) => {
+        const amount = Math.abs(value).toLocaleString(undefined, {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: cents ? 2 : 0,
+            maximumFractionDigits: cents ? 2 : 0,
+        });
+        if (value === 0) {
+            return '$0';
+        }
+        return `${value > 0 ? '+' : '-'}${amount}`;
+    };
+
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: payload.labels,
+            datasets: [{
+                label: 'Net',
+                data: payload.values,
+                borderColor: (context) => lineColor(context.raw || 0),
+                backgroundColor: 'rgba(15, 77, 66, 0.08)',
+                fill: {
+                    target: 'origin',
+                    above: 'rgba(23, 107, 91, 0.12)',
+                    below: 'rgba(180, 35, 24, 0.12)',
+                },
+                borderWidth: 3,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                pointBackgroundColor: (context) => lineColor(context.raw || 0),
+                pointBorderWidth: 0,
+                tension: 0.28,
+                segment: {
+                    borderColor: (context) => lineColor(Math.min(context.p0.parsed.y, context.p1.parsed.y)),
+                },
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                intersect: false,
+                mode: 'index',
+            },
+            plugins: {
+                legend: {
+                    display: false,
+                },
+                tooltip: {
+                    callbacks: {
+                        label: (context) => `Net ${formatSignedCurrency(context.parsed.y)}`,
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    grid: {
+                        display: false,
+                    },
+                    ticks: {
+                        color: '#68717d',
+                        maxRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: 12,
+                    },
+                },
+                y: {
+                    grid: {
+                        color: (context) => context.tick.value === 0 ? '#9aa6af' : '#d8ded8',
+                        lineWidth: (context) => context.tick.value === 0 ? 2 : 1,
+                    },
+                    ticks: {
+                        color: '#68717d',
+                        callback: (value) => formatSignedCurrency(value, false),
+                    },
+                },
+            },
+        },
+    });
+})();
+</script>
+{% endblock %}
