@@ -13,6 +13,7 @@
                 <tr>
                     <th>Date</th>
                     <th>Activity</th>
+                    <th>Category</th>
                     <th>Details</th>
                     <th>Amount</th>
                 </tr>
@@ -22,11 +23,12 @@
                     <tr>
                         <td>{{ row.event.event_date }}</td>
                         <td>{{ row.label }}</td>
+                        <td>{{ row.category|default:"-" }}</td>
                         <td>{{ row.details|default:"-" }}</td>
                         <td class="amount {{ row.amount_class }}">{{ row.signed_amount_units|signed_money_units }}</td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="4" class="empty">No activity yet.</td></tr>
+                    <tr><td colspan="5" class="empty">No activity yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

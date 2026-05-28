@@ -11,6 +11,7 @@ from .models import (
     LedgerEntry,
     LedgerTransaction,
     Obligation,
+    ObligationCategory,
 )
 
 
@@ -19,11 +20,18 @@ class LedgerAccountInline(admin.TabularInline):
     extra = 0
 
 
+@admin.register(ObligationCategory)
+class ObligationCategoryAdmin(admin.ModelAdmin):
+    list_display = ('name', 'active')
+    list_filter = ('active',)
+    search_fields = ('name',)
+
+
 @admin.register(Obligation)
 class ObligationAdmin(admin.ModelAdmin):
-    list_display = ('title', 'borrower', 'creditor', 'status', 'opened_on', 'currency')
+    list_display = ('title', 'borrower', 'creditor', 'category', 'status', 'opened_on', 'currency')
     list_filter = ('status', 'currency', 'category')
-    search_fields = ('title', 'borrower__username', 'creditor__username')
+    search_fields = ('title', 'borrower__username', 'creditor__username', 'category__name')
     inlines = [LedgerAccountInline]
 
 

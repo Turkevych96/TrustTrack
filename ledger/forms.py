@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from ledger.models import EventSeries, EventSeriesVersion, FinancialEvent, InterestRatePeriod
+from ledger.models import EventSeries, EventSeriesVersion, FinancialEvent, InterestRatePeriod, ObligationCategory
 from ledger.services.money import units_from_decimal
 
 
@@ -40,7 +40,7 @@ class CreateObligationForm(MoneyForm):
     role = forms.ChoiceField(choices=ROLE_CHOICES)
     counterparty = UserChoiceField(queryset=get_user_model().objects.none())
     title = forms.CharField(max_length=160)
-    category = forms.CharField(max_length=80, required=False)
+    category = forms.ModelChoiceField(queryset=ObligationCategory.objects.none(), required=False)
     opened_on = forms.DateField(
         initial=timezone.localdate,
         widget=forms.DateInput(attrs={'type': 'date'}),
@@ -56,6 +56,7 @@ class CreateObligationForm(MoneyForm):
             .exclude(pk=user.pk)
             .order_by('username')
         )
+        self.fields['category'].queryset = ObligationCategory.objects.filter(active=True).order_by('name')
         self.order_fields(['role', 'counterparty', 'title', 'category', 'amount', 'opened_on', 'memo'])
 
     def get_participants(self):

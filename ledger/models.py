@@ -18,6 +18,18 @@ class TimestampedModel(models.Model):
         abstract = True
 
 
+class ObligationCategory(TimestampedModel):
+    name = models.CharField(max_length=80, unique=True)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name_plural = 'obligation categories'
+
+    def __str__(self):
+        return self.name
+
+
 class Obligation(TimestampedModel):
     class Status(models.TextChoices):
         OPEN = 'open', 'Open'
@@ -35,7 +47,13 @@ class Obligation(TimestampedModel):
         related_name='debt_obligations',
     )
     title = models.CharField(max_length=160)
-    category = models.CharField(max_length=80, blank=True)
+    category = models.ForeignKey(
+        ObligationCategory,
+        on_delete=models.PROTECT,
+        related_name='obligations',
+        null=True,
+        blank=True,
+    )
     currency = models.CharField(max_length=3, default=DEFAULT_CURRENCY)
     currency_exponent = models.PositiveSmallIntegerField(
         default=DEFAULT_CURRENCY_EXPONENT,

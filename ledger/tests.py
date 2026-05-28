@@ -17,6 +17,7 @@ from ledger.models import (
     LedgerEntry,
     LedgerTransaction,
     Obligation,
+    ObligationCategory,
 )
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import ensure_obligation_accounts, post_principal_advance, post_repayment
@@ -699,6 +700,7 @@ class ViewTests(LedgerTestCase):
     def test_create_obligation_posts_initial_principal(self):
         user_model = get_user_model()
         counterparty = user_model.objects.create_user(username='maria')
+        category = ObligationCategory.objects.create(name='Equipment')
         self.client.force_login(self.creditor_user)
 
         response = self.client.post(
@@ -707,7 +709,7 @@ class ViewTests(LedgerTestCase):
                 'role': 'lent',
                 'counterparty': counterparty.pk,
                 'title': 'Hardware',
-                'category': 'Equipment',
+                'category': category.pk,
                 'opened_on': '2026-02-01',
                 'amount': '100.00',
                 'memo': 'Laptop',
@@ -718,7 +720,32 @@ class ViewTests(LedgerTestCase):
         self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}))
         self.assertEqual(obligation.creditor, self.creditor_user)
         self.assertEqual(obligation.borrower, counterparty)
+        self.assertEqual(obligation.category, category)
         self.assertEqual(get_obligation_balance(obligation), 1_000_000)
+
+        event = obligation.financial_events.get(event_type=FinancialEvent.EventType.PRINCIPAL_ADVANCE)
+        self.assertEqual(event.memo, 'Laptop')
+        self.assertEqual(event.category, 'Equipment')
+
+    def test_activity_uses_memo_for_details_and_limits_it_to_50_characters(self):
+        long_memo = '123456789012345678901234567890123456789012345678901234567890'
+        post_principal_advance(
+            self.obligation,
+            amount_units=1_000_000,
+            event_date=date(2026, 1, 1),
+            memo=long_memo,
+            category='Equipment',
+        )
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.get(reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        row = response.context['activity_rows'][0]
+
+        self.assertEqual(row['category'], 'Equipment')
+        self.assertEqual(row['details'], '12345678901234567890123456789012345678901234567...')
+        self.assertEqual(len(row['details']), 50)
+        self.assertContains(response, 'Equipment')
+        self.assertContains(response, row['details'])
 
     def test_create_obligation_counterparty_uses_full_name_before_username(self):
         user_model = get_user_model()

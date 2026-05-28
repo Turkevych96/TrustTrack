@@ -163,11 +163,12 @@ def obligation_create(request):
             creditor, borrower = form.get_participants()
             try:
                 with transaction.atomic():
+                    category = form.cleaned_data.get('category')
                     obligation = Obligation(
                         creditor=creditor,
                         borrower=borrower,
                         title=form.cleaned_data['title'],
-                        category=form.cleaned_data.get('category', ''),
+                        category=category,
                         opened_on=form.cleaned_data['opened_on'],
                     )
                     obligation.full_clean()
@@ -177,7 +178,7 @@ def obligation_create(request):
                         amount_units=form.amount_units,
                         event_date=form.cleaned_data['opened_on'],
                         memo=form.cleaned_data.get('memo', ''),
-                        category=form.cleaned_data.get('category', ''),
+                        category=category.name if category else '',
                     )
                 return redirect('ledger:obligation_detail', pk=obligation.pk)
             except ValidationError as error:
@@ -477,7 +478,8 @@ def _activity_row(event, user):
         'label': _activity_label(event, user),
         'signed_amount_units': signed_amount_units,
         'amount_class': 'positive' if signed_amount_units >= 0 else 'negative',
-        'details': event.memo or event.category,
+        'category': event.category,
+        'details': _truncate_activity_details(event.memo),
     }
 
 
@@ -516,3 +518,10 @@ def _role_for(obligation, user):
     if obligation.borrower_id == user.id:
         return 'borrower'
     return 'creditor'
+
+
+def _truncate_activity_details(value, limit=50):
+    value = (value or '').strip()
+    if len(value) <= limit:
+        return value
+    return f'{value[:limit - 3]}...'
