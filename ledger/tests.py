@@ -540,6 +540,24 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'Test loan')
         self.assertNotContains(response, 'Private loan')
 
+    def test_nav_hides_duplicate_new_obligation_and_limits_admin_link_to_staff(self):
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('ledger:dashboard'))
+
+        self.assertContains(response, 'New obligation', count=1)
+        self.assertNotContains(response, reverse('admin:index'))
+        self.assertNotContains(response, 'Admin')
+
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        staff_response = self.client.get(reverse('ledger:dashboard'))
+
+        self.assertContains(staff_response, 'New obligation', count=1)
+        self.assertContains(staff_response, reverse('admin:index'))
+        self.assertContains(staff_response, 'Admin')
+
     def test_open_obligation_detail_keeps_maintenance_actions_in_settings_menu(self):
         self.client.force_login(self.creditor_user)
 

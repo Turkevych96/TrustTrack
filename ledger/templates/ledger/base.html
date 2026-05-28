@@ -328,8 +328,9 @@
                 <div class="nav-links">
                     <a href="{% url 'ledger:dashboard' %}">Dashboard</a>
                     <a href="{% url 'ledger:obligation_list' %}">Obligations</a>
-                    <a href="{% url 'ledger:obligation_create' %}">New obligation</a>
-                    <a href="{% url 'admin:index' %}">Admin</a>
+                    {% if request.user.is_staff %}
+                        <a href="{% url 'admin:index' %}">Admin</a>
+                    {% endif %}
                 </div>
                 <div class="nav-user">
                     <span>{{ request.user|user_label }}</span>
