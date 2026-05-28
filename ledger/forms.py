@@ -24,6 +24,11 @@ class MoneyForm(forms.Form):
         return units_from_decimal(self.cleaned_data['amount'])
 
 
+class UserChoiceField(forms.ModelChoiceField):
+    def label_from_instance(self, user):
+        return user.get_full_name() or user.get_username()
+
+
 class CreateObligationForm(MoneyForm):
     ROLE_LENT = 'lent'
     ROLE_BORROWED = 'borrowed'
@@ -33,7 +38,7 @@ class CreateObligationForm(MoneyForm):
     )
 
     role = forms.ChoiceField(choices=ROLE_CHOICES)
-    counterparty = forms.ModelChoiceField(queryset=get_user_model().objects.none())
+    counterparty = UserChoiceField(queryset=get_user_model().objects.none())
     title = forms.CharField(max_length=160)
     category = forms.CharField(max_length=80, required=False)
     opened_on = forms.DateField(

@@ -720,6 +720,18 @@ class ViewTests(LedgerTestCase):
         self.assertEqual(obligation.borrower, counterparty)
         self.assertEqual(get_obligation_balance(obligation), 1_000_000)
 
+    def test_create_obligation_counterparty_uses_full_name_before_username(self):
+        user_model = get_user_model()
+        user_model.objects.create_user(username='maria_login', first_name='Maria', last_name='Ivanova')
+        user_model.objects.create_user(username='username_only')
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.get(reverse('ledger:obligation_create'))
+
+        self.assertContains(response, 'Maria Ivanova')
+        self.assertContains(response, 'username_only')
+        self.assertNotContains(response, 'maria_login')
+
     def test_repayment_form_rejects_overpayment(self):
         post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
         self.client.force_login(self.borrower_user)
