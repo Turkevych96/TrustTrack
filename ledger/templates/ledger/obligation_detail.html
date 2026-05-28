@@ -25,6 +25,7 @@
                     <span class="sr-only">Obligation settings</span>
                 </summary>
                 <div class="action-menu-panel">
+                    <a class="menu-item" href="{% url 'ledger:recurring_recalculate' obligation.id %}">Recalculate recurring events</a>
                     <a class="menu-item" href="{% url 'ledger:interest_recalculate' obligation.id %}">Recalculate interest</a>
                     <form class="menu-form" method="post" action="{% url 'ledger:recurring_due_generate' obligation.id %}">
                         {% csrf_token %}

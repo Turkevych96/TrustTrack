@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction as db_transaction
+from django.utils import timezone
 
 from ledger.models import (
     AuditEvent,
@@ -61,6 +62,7 @@ def post_scheduled_charge(
     event_series_version=None,
     period_start=None,
     period_end=None,
+    revision=1,
     idempotency_key=None,
 ):
     return _post_debt_increase(
@@ -75,6 +77,7 @@ def post_scheduled_charge(
         event_series_version=event_series_version,
         period_start=period_start,
         period_end=period_end,
+        revision=revision,
         idempotency_key=idempotency_key,
     )
 
@@ -89,6 +92,7 @@ def post_scheduled_repayment(
     event_series_version=None,
     period_start=None,
     period_end=None,
+    revision=1,
     idempotency_key=None,
 ):
     if amount_units > get_obligation_balance(obligation, as_of=event_date):
@@ -106,6 +110,7 @@ def post_scheduled_repayment(
         event_series_version=event_series_version,
         period_start=period_start,
         period_end=period_end,
+        revision=revision,
         idempotency_key=idempotency_key,
     )
 
@@ -142,6 +147,45 @@ def post_interest_reversal(obligation, amount_units, event_date, memo='', period
     )
 
 
+def post_recurring_event_reversal(original_event, idempotency_key=None):
+    if original_event.source != FinancialEvent.Source.GENERATED or not original_event.event_series_id:
+        raise ValidationError('Only generated recurring events can be reversed by recurring recalculation.')
+
+    idempotency_key = idempotency_key or f'recurring-reversal:{original_event.pk}'
+    memo = f'Reverse generated {original_event.get_event_type_display()} from {original_event.event_date.isoformat()}'
+    with db_transaction.atomic():
+        if original_event.direction == FinancialEvent.Direction.INCREASES_DEBT:
+            ledger_transaction = _post_debt_decrease(
+                obligation=original_event.obligation,
+                amount_units=original_event.amount_units,
+                event_date=original_event.event_date,
+                event_type=FinancialEvent.EventType.ADJUSTMENT,
+                source=FinancialEvent.Source.SYSTEM,
+                memo=memo,
+                category='recurring_reversal',
+                period_start=original_event.period_start,
+                period_end=original_event.period_end,
+                idempotency_key=idempotency_key,
+            )
+        else:
+            ledger_transaction = _post_debt_increase(
+                obligation=original_event.obligation,
+                amount_units=original_event.amount_units,
+                event_date=original_event.event_date,
+                event_type=FinancialEvent.EventType.ADJUSTMENT,
+                source=FinancialEvent.Source.SYSTEM,
+                memo=memo,
+                category='recurring_reversal',
+                period_start=original_event.period_start,
+                period_end=original_event.period_end,
+                idempotency_key=idempotency_key,
+            )
+        if not original_event.voided_at:
+            original_event.voided_at = timezone.now()
+            original_event.save(update_fields=['voided_at', 'updated_at'])
+        return ledger_transaction
+
+
 def _post_debt_increase(
     obligation,
     amount_units,
@@ -154,6 +198,7 @@ def _post_debt_increase(
     event_series_version=None,
     period_start=None,
     period_end=None,
+    revision=1,
     idempotency_key=None,
 ):
     _validate_postable_amount(amount_units)
@@ -176,6 +221,7 @@ def _post_debt_increase(
             event_series_version=event_series_version,
             period_start=period_start,
             period_end=period_end,
+            revision=revision,
         )
         ledger_transaction = _create_transaction(
             obligation=obligation,
@@ -204,6 +250,7 @@ def _post_debt_decrease(
     event_series_version=None,
     period_start=None,
     period_end=None,
+    revision=1,
     idempotency_key=None,
 ):
     _validate_postable_amount(amount_units)
@@ -226,6 +273,7 @@ def _post_debt_decrease(
             event_series_version=event_series_version,
             period_start=period_start,
             period_end=period_end,
+            revision=revision,
         )
         ledger_transaction = _create_transaction(
             obligation=obligation,
@@ -255,6 +303,7 @@ def _create_financial_event(
     event_series_version=None,
     period_start=None,
     period_end=None,
+    revision=1,
 ):
     event = FinancialEvent(
         obligation=obligation,
@@ -271,6 +320,7 @@ def _create_financial_event(
         event_series_version=event_series_version,
         period_start=period_start,
         period_end=period_end,
+        revision=revision,
     )
     event.full_clean()
     event.save()

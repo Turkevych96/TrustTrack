@@ -268,15 +268,25 @@ class FinancialEvent(TimestampedModel):
     )
     period_start = models.DateField(null=True, blank=True)
     period_end = models.DateField(null=True, blank=True)
+    revision = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
     voided_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-event_date', '-created_at']
         constraints = [
             models.UniqueConstraint(
-                fields=['event_series', 'period_start'],
+                fields=['event_series', 'period_start', 'revision'],
                 condition=Q(event_series__isnull=False, period_start__isnull=False),
-                name='unique_series_period_event',
+                name='unique_series_period_event_revision',
+            ),
+            models.UniqueConstraint(
+                fields=['event_series', 'period_start'],
+                condition=Q(
+                    event_series__isnull=False,
+                    period_start__isnull=False,
+                    voided_at__isnull=True,
+                ),
+                name='unique_active_series_period_event',
             ),
         ]
 

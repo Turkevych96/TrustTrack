@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -25,7 +26,11 @@ from ledger.services.interest import (
     post_monthly_interest,
     recalculate_interest_from,
 )
-from ledger.services.recurring import generate_due_recurring_events, generate_recurring_events_for_month
+from ledger.services.recurring import (
+    generate_due_recurring_events,
+    generate_recurring_events_for_month,
+    recalculate_due_recurring_events,
+)
 from ledger.templatetags.money import money_units
 
 
@@ -305,6 +310,94 @@ class RecurringTests(LedgerTestCase):
         ])
         self.assertEqual(get_obligation_balance(self.obligation), 700_000)
 
+    def test_recalculate_recurring_reverses_generated_events_after_schedule_end(self):
+        post_principal_advance(self.obligation, amount_units=100_000_000, event_date=date(2026, 1, 1))
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Weekly direct deposit',
+            event_type=FinancialEvent.EventType.REPAYMENT,
+            frequency=EventSeries.Frequency.WEEKLY,
+            day_of_week=0,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=1_000_000,
+            valid_from=date(2026, 1, 1),
+        )
+        generate_due_recurring_events(obligation=self.obligation, through_date=date(2026, 5, 28))
+        generated_after_end = list(
+            FinancialEvent.objects.filter(
+                obligation=self.obligation,
+                event_series=series,
+                source=FinancialEvent.Source.GENERATED,
+                event_date__gt=date(2026, 3, 31),
+            )
+        )
+        old_balance = get_obligation_balance(self.obligation)
+
+        series.ends_on = date(2026, 3, 31)
+        series.save(update_fields=['ends_on', 'updated_at'])
+        result = recalculate_due_recurring_events(
+            self.obligation,
+            from_date=date(2026, 4, 1),
+            through_date=date(2026, 5, 28),
+        )
+
+        for event in generated_after_end:
+            event.refresh_from_db()
+            self.assertIsNotNone(event.voided_at)
+        self.assertEqual(len(result['reversed_events']), len(generated_after_end))
+        self.assertEqual(len(result['reversal_transactions']), len(generated_after_end))
+        self.assertEqual(get_obligation_balance(self.obligation), old_balance + len(generated_after_end) * 1_000_000)
+
+    def test_recalculate_recurring_can_restore_voided_events_as_new_revisions(self):
+        post_principal_advance(self.obligation, amount_units=100_000_000, event_date=date(2026, 1, 1))
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Weekly direct deposit',
+            event_type=FinancialEvent.EventType.REPAYMENT,
+            frequency=EventSeries.Frequency.WEEKLY,
+            day_of_week=0,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=1_000_000,
+            valid_from=date(2026, 1, 1),
+        )
+        generate_due_recurring_events(obligation=self.obligation, through_date=date(2026, 5, 28))
+        original_balance = get_obligation_balance(self.obligation)
+
+        series.ends_on = date(2026, 3, 31)
+        series.save(update_fields=['ends_on', 'updated_at'])
+        first_result = recalculate_due_recurring_events(
+            self.obligation,
+            from_date=date(2026, 4, 1),
+            through_date=date(2026, 5, 28),
+        )
+
+        series.ends_on = None
+        series.save(update_fields=['ends_on', 'updated_at'])
+        second_result = recalculate_due_recurring_events(
+            self.obligation,
+            from_date=date(2026, 4, 1),
+            through_date=date(2026, 5, 28),
+        )
+
+        active_restored_events = FinancialEvent.objects.filter(
+            obligation=self.obligation,
+            event_series=series,
+            source=FinancialEvent.Source.GENERATED,
+            event_date__gte=date(2026, 4, 1),
+            event_date__lte=date(2026, 5, 28),
+            voided_at__isnull=True,
+            revision=2,
+        )
+        self.assertEqual(len(second_result['created_transactions']), len(first_result['reversed_events']))
+        self.assertEqual(active_restored_events.count(), len(first_result['reversed_events']))
+        self.assertEqual(get_obligation_balance(self.obligation), original_balance)
+
 
 class InterestTests(LedgerTestCase):
     def test_interest_uses_apr_divided_by_365(self):
@@ -454,6 +547,7 @@ class ViewTests(LedgerTestCase):
 
         self.assertContains(response, 'Repayment')
         self.assertContains(response, 'Obligation settings')
+        self.assertContains(response, 'Recalculate recurring events')
         self.assertContains(response, 'Generate due recurring events')
         self.assertContains(response, 'Generate due interest')
 
@@ -819,6 +913,43 @@ class ViewTests(LedgerTestCase):
 
         self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
         self.assertEqual(get_obligation_balance(self.obligation), 10_000_000)
+
+    def test_recalculate_recurring_view_reverses_no_longer_due_events(self):
+        post_principal_advance(self.obligation, amount_units=100_000_000, event_date=date(2026, 1, 1))
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Weekly direct deposit',
+            event_type=FinancialEvent.EventType.REPAYMENT,
+            frequency=EventSeries.Frequency.WEEKLY,
+            day_of_week=0,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=1_000_000,
+            valid_from=date(2026, 1, 1),
+        )
+        generate_due_recurring_events(obligation=self.obligation, through_date=date(2026, 5, 28))
+        series.ends_on = date(2026, 3, 31)
+        series.save(update_fields=['ends_on', 'updated_at'])
+        self.client.force_login(self.borrower_user)
+
+        with patch('ledger.services.recurring.timezone.localdate', return_value=date(2026, 5, 28)):
+            response = self.client.post(
+                reverse('ledger:recurring_recalculate', kwargs={'pk': self.obligation.pk}),
+                {'from_date': '2026-04-01'},
+            )
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        self.assertTrue(
+            FinancialEvent.objects.filter(
+                obligation=self.obligation,
+                event_series=series,
+                source=FinancialEvent.Source.GENERATED,
+                event_date__gt=date(2026, 3, 31),
+                voided_at__isnull=False,
+            ).exists()
+        )
 
     def test_close_obligation_view_stops_tracking_without_deleting_history(self):
         post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))

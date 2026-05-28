@@ -306,6 +306,14 @@ class InterestRecalculateForm(forms.Form):
     )
 
 
+class RecurringRecalculateForm(forms.Form):
+    from_date = forms.DateField(
+        label='Recalculate from date',
+        help_text='Generated recurring events from this date forward will be compared with the current schedules.',
+        widget=forms.DateInput(attrs={'type': 'date'}),
+    )
+
+
 def models_version_valid_on_or_after(valid_from):
     from django.db.models import Q
 

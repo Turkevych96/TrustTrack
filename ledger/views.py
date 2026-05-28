@@ -13,6 +13,7 @@ from ledger.forms import (
     InterestRecalculateForm,
     InterestRatePeriodForm,
     RecurringChargeForm,
+    RecurringRecalculateForm,
     RecurringSeriesUpdateForm,
     RepaymentForm,
 )
@@ -28,7 +29,7 @@ from ledger.models import (
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import post_principal_advance, post_repayment
 from ledger.services.interest import generate_due_interest, recalculate_interest_from
-from ledger.services.recurring import generate_due_recurring_events
+from ledger.services.recurring import generate_due_recurring_events, recalculate_due_recurring_events
 
 
 HISTORY_PREVIEW_LIMIT = 10
@@ -371,6 +372,38 @@ def interest_recalculate(request, pk):
 
 
 @login_required
+def recurring_recalculate(request, pk):
+    obligation = get_related_obligation(request.user, pk)
+    if request.method == 'POST':
+        form = RecurringRecalculateForm(request.POST)
+        if form.is_valid():
+            try:
+                result = recalculate_due_recurring_events(obligation, form.cleaned_data['from_date'])
+                messages.success(
+                    request,
+                    (
+                        f"Reversed {len(result['reversed_events'])} no-longer-due recurring event(s) and "
+                        f"generated {len(result['created_transactions'])} missing recurring event(s)."
+                    ),
+                )
+                return redirect('ledger:obligation_detail', pk=obligation.pk)
+            except ValidationError as error:
+                form.add_error(None, error)
+    else:
+        form = RecurringRecalculateForm(initial={'from_date': obligation.opened_on})
+    return render(
+        request,
+        'ledger/form.html',
+        {
+            'title': f'Recalculate recurring events: {obligation.title}',
+            'form': form,
+            'submit_label': 'Recalculate recurring events',
+            'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
+        },
+    )
+
+
+@login_required
 @require_POST
 def recurring_due_generate(request, pk):
     obligation = get_related_obligation(request.user, pk)
@@ -466,6 +499,8 @@ def _activity_label(event, user):
     if event.event_type == FinancialEvent.EventType.INTEREST_POSTING:
         return 'Interest added'
     if event.event_type == FinancialEvent.EventType.ADJUSTMENT:
+        if event.category == 'recurring_reversal':
+            return 'Recurring event reversed'
         return 'Adjustment'
     return event.get_event_type_display()
 
