@@ -32,6 +32,7 @@ from ledger.services.balances import get_obligation_balance
 from ledger.services.events import post_principal_advance, post_repayment
 from ledger.services.interest import generate_due_interest, recalculate_interest_from
 from ledger.services.planner import build_portfolio_projection, simulate_monthly_payment
+from ledger.services.recalculation import recalculate_obligation
 from ledger.services.recurring import generate_due_recurring_events, recalculate_due_recurring_events
 
 
@@ -390,6 +391,29 @@ def interest_rate_update(request, pk, rate_pk):
             'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
         },
     )
+
+
+@login_required
+@require_POST
+def obligation_recalculate(request, pk):
+    obligation = get_related_obligation(request.user, pk)
+    try:
+        result = recalculate_obligation(obligation)
+        recurring_result = result['recurring']
+        interest_result = result['interest']
+        messages.success(
+            request,
+            (
+                f"Recalculated from {result['from_date']}: "
+                f"reversed {len(recurring_result['reversed_events'])} recurring event(s), "
+                f"generated {len(recurring_result['created_transactions'])} recurring event(s), "
+                f"reversed {len(interest_result['reversed_runs'])} interest month(s), and "
+                f"posted {len(interest_result['posted_runs'])} interest month(s)."
+            ),
+        )
+    except ValidationError as error:
+        messages.error(request, error.message if hasattr(error, 'message') else str(error))
+    return redirect('ledger:obligation_detail', pk=obligation.pk)
 
 
 @login_required

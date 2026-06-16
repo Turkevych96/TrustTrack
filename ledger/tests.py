@@ -647,9 +647,10 @@ class ViewTests(LedgerTestCase):
 
         self.assertContains(response, 'Repayment')
         self.assertContains(response, 'Obligation settings')
-        self.assertContains(response, 'Recalculate recurring events')
-        self.assertContains(response, 'Generate due recurring events')
-        self.assertContains(response, 'Generate due interest')
+        self.assertContains(response, 'Recalculate balance &amp; interest')
+        self.assertNotContains(response, 'Recalculate recurring events')
+        self.assertNotContains(response, 'Generate due recurring events')
+        self.assertNotContains(response, 'Generate due interest')
 
     def test_obligation_detail_limits_recent_activity(self):
         for index in range(12):
@@ -774,6 +775,7 @@ class ViewTests(LedgerTestCase):
         self.assertNotContains(response, 'Repayment')
         self.assertNotContains(response, reverse('ledger:recurring_charge_create', kwargs={'pk': self.obligation.pk}))
         self.assertNotContains(response, reverse('ledger:interest_rate_create', kwargs={'pk': self.obligation.pk}))
+        self.assertNotContains(response, 'Recalculate balance &amp; interest')
         self.assertNotContains(response, 'Generate due recurring events')
         self.assertNotContains(response, 'Generate due interest')
         self.assertNotContains(response, 'Stop tracking')
@@ -1126,6 +1128,45 @@ class ViewTests(LedgerTestCase):
                 status=InterestAccrualRun.Status.POSTED,
             ).exists()
         )
+
+    def test_obligation_recalculate_rebuilds_balance_before_interest(self):
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Monthly charge',
+            day_of_month=1,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=1_000_000,
+            valid_from=date(2026, 1, 1),
+        )
+        InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('10.0000'),
+            effective_from=date(2026, 1, 1),
+        )
+        self.client.force_login(self.creditor_user)
+
+        with patch('ledger.services.recalculation.timezone.localdate', return_value=date(2026, 2, 15)):
+            response = self.client.post(reverse('ledger:obligation_recalculate', kwargs={'pk': self.obligation.pk}))
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        self.assertEqual(
+            FinancialEvent.objects.filter(
+                obligation=self.obligation,
+                event_type=FinancialEvent.EventType.SCHEDULED_CHARGE,
+                source=FinancialEvent.Source.GENERATED,
+            ).count(),
+            2,
+        )
+        january_interest = InterestAccrualRun.objects.get(
+            obligation=self.obligation,
+            period_start=date(2026, 1, 1),
+            status=InterestAccrualRun.Status.POSTED,
+        )
+        self.assertEqual(january_interest.calculated_interest_amount_units, 16_986)
 
     def test_generate_due_charges_view_posts_due_recurring_events(self):
         current_month = timezone.localdate().replace(day=1)
