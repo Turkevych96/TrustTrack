@@ -807,6 +807,101 @@ class ViewTests(LedgerTestCase):
         event = obligation.financial_events.get(event_type=FinancialEvent.EventType.PRINCIPAL_ADVANCE)
         self.assertEqual(event.memo, 'Laptop')
         self.assertEqual(event.category, 'Equipment')
+        self.assertFalse(obligation.event_series.exists())
+        self.assertFalse(obligation.interest_rate_periods.exists())
+
+    def test_create_recurring_obligation_creates_initial_principal_and_series(self):
+        user_model = get_user_model()
+        counterparty = user_model.objects.create_user(username='maria')
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(
+            reverse('ledger:obligation_create'),
+            {
+                'role': 'lent',
+                'counterparty': counterparty.pk,
+                'title': 'Monthly rent',
+                'category': '',
+                'payment_mode': 'recurring',
+                'opened_on': '2026-02-01',
+                'amount': '1000.00',
+                'recurring_frequency': EventSeries.Frequency.MONTHLY,
+                'recurring_day_of_month': '5',
+                'recurring_day_of_week': '',
+                'recurring_starts_on': '2026-03-05',
+                'recurring_ends_on': '',
+                'memo': 'Rent schedule',
+            },
+        )
+
+        obligation = Obligation.objects.get(title='Monthly rent')
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}))
+        self.assertEqual(get_obligation_balance(obligation), 10_000_000)
+
+        series = obligation.event_series.get()
+        version = series.versions.get()
+        self.assertEqual(series.event_type, FinancialEvent.EventType.SCHEDULED_CHARGE)
+        self.assertEqual(series.frequency, EventSeries.Frequency.MONTHLY)
+        self.assertEqual(series.day_of_month, 5)
+        self.assertEqual(series.starts_on, date(2026, 3, 5))
+        self.assertEqual(version.amount_units, 10_000_000)
+        self.assertEqual(version.valid_from, date(2026, 3, 5))
+
+    def test_create_obligation_can_add_initial_interest_rate(self):
+        user_model = get_user_model()
+        counterparty = user_model.objects.create_user(username='maria')
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(
+            reverse('ledger:obligation_create'),
+            {
+                'role': 'lent',
+                'counterparty': counterparty.pk,
+                'title': 'Interest loan',
+                'category': '',
+                'payment_mode': 'one_time',
+                'opened_on': '2026-02-01',
+                'amount': '100.00',
+                'has_interest': 'on',
+                'annual_rate_percent': '3.5',
+                'memo': 'With rate',
+            },
+        )
+
+        obligation = Obligation.objects.get(title='Interest loan')
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}))
+        rate = obligation.interest_rate_periods.get()
+        self.assertEqual(rate.annual_rate_percent, Decimal('3.5000'))
+        self.assertEqual(rate.effective_from, date(2026, 2, 1))
+        self.assertEqual(rate.memo, 'With rate')
+
+    def test_create_recurring_obligation_requires_matching_schedule_day(self):
+        user_model = get_user_model()
+        counterparty = user_model.objects.create_user(username='maria')
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(
+            reverse('ledger:obligation_create'),
+            {
+                'role': 'lent',
+                'counterparty': counterparty.pk,
+                'title': 'Invalid recurring',
+                'category': '',
+                'payment_mode': 'recurring',
+                'opened_on': '2026-02-01',
+                'amount': '100.00',
+                'recurring_frequency': EventSeries.Frequency.WEEKLY,
+                'recurring_day_of_month': '',
+                'recurring_day_of_week': '',
+                'recurring_starts_on': '2026-02-01',
+                'recurring_ends_on': '',
+                'memo': '',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Day of week is required')
+        self.assertFalse(Obligation.objects.filter(title='Invalid recurring').exists())
 
     def test_activity_uses_memo_for_details_and_limits_it_to_50_characters(self):
         long_memo = '123456789012345678901234567890123456789012345678901234567890'

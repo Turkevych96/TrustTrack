@@ -10,6 +10,17 @@ from ledger.models import EventSeries, EventSeriesVersion, FinancialEvent, Inter
 from ledger.services.money import units_from_decimal
 
 
+DAY_OF_WEEK_CHOICES = (
+    (0, 'Monday'),
+    (1, 'Tuesday'),
+    (2, 'Wednesday'),
+    (3, 'Thursday'),
+    (4, 'Friday'),
+    (5, 'Saturday'),
+    (6, 'Sunday'),
+)
+
+
 class MoneyForm(forms.Form):
     amount = forms.DecimalField(
         label='Amount',
@@ -32,22 +43,94 @@ class UserChoiceField(forms.ModelChoiceField):
 class CreateObligationForm(MoneyForm):
     ROLE_LENT = 'lent'
     ROLE_BORROWED = 'borrowed'
+    PAYMENT_MODE_ONE_TIME = 'one_time'
+    PAYMENT_MODE_RECURRING = 'recurring'
+
     ROLE_CHOICES = (
         (ROLE_LENT, 'I lent money'),
         (ROLE_BORROWED, 'I borrowed money'),
+    )
+    PAYMENT_MODE_CHOICES = (
+        (PAYMENT_MODE_ONE_TIME, 'One-time payment'),
+        (PAYMENT_MODE_RECURRING, 'Recurring payment'),
     )
 
     role = forms.ChoiceField(choices=ROLE_CHOICES)
     counterparty = UserChoiceField(queryset=get_user_model().objects.none())
     title = forms.CharField(max_length=160)
     category = forms.ModelChoiceField(queryset=ObligationCategory.objects.none(), required=False)
+    payment_mode = forms.ChoiceField(
+        label='Payment schedule',
+        choices=PAYMENT_MODE_CHOICES,
+        initial=PAYMENT_MODE_ONE_TIME,
+        required=False,
+        widget=forms.RadioSelect,
+    )
     opened_on = forms.DateField(
         initial=timezone.localdate,
         widget=forms.DateInput(attrs={'type': 'date'}),
     )
+    recurring_frequency = forms.ChoiceField(
+        label='Repeat',
+        choices=EventSeries.Frequency.choices,
+        initial=EventSeries.Frequency.MONTHLY,
+        required=False,
+    )
+    recurring_day_of_month = forms.IntegerField(
+        label='Day of month',
+        min_value=1,
+        max_value=31,
+        initial=1,
+        required=False,
+    )
+    recurring_day_of_week = forms.ChoiceField(
+        label='Day of week',
+        choices=DAY_OF_WEEK_CHOICES,
+        required=False,
+    )
+    recurring_starts_on = forms.DateField(
+        label='Recurring starts on',
+        required=False,
+        widget=forms.DateInput(attrs={'type': 'date'}),
+    )
+    recurring_ends_on = forms.DateField(
+        label='Recurring ends on',
+        required=False,
+        widget=forms.DateInput(attrs={'type': 'date'}),
+    )
+    has_interest = forms.BooleanField(label='With interest', required=False)
+    annual_rate_percent = forms.DecimalField(
+        label='Annual interest rate (%)',
+        max_digits=9,
+        decimal_places=4,
+        min_value=Decimal('0.0001'),
+        required=False,
+        widget=forms.NumberInput(attrs={'step': '0.0001', 'min': '0.0001'}),
+        help_text='Example: 3.5 means 3.5% APR.',
+    )
     memo = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
 
     def __init__(self, *args, user, **kwargs):
+        if args and args[0] is not None:
+            data = args[0].copy()
+            payment_mode = data.get('payment_mode') or self.PAYMENT_MODE_ONE_TIME
+            frequency = data.get('recurring_frequency') or EventSeries.Frequency.MONTHLY
+            if payment_mode != self.PAYMENT_MODE_RECURRING:
+                for field_name in (
+                    'recurring_frequency',
+                    'recurring_day_of_month',
+                    'recurring_day_of_week',
+                    'recurring_starts_on',
+                    'recurring_ends_on',
+                ):
+                    data[field_name] = ''
+            elif frequency == EventSeries.Frequency.MONTHLY:
+                data['recurring_day_of_week'] = ''
+            else:
+                data['recurring_day_of_month'] = ''
+            if not data.get('has_interest'):
+                data['annual_rate_percent'] = ''
+            args = (data, *args[1:])
         super().__init__(*args, **kwargs)
         self.user = user
         self.fields['counterparty'].queryset = (
@@ -57,13 +140,105 @@ class CreateObligationForm(MoneyForm):
             .order_by('username')
         )
         self.fields['category'].queryset = ObligationCategory.objects.filter(active=True).order_by('name')
-        self.order_fields(['role', 'counterparty', 'title', 'category', 'amount', 'opened_on', 'memo'])
+        self.order_fields([
+            'role',
+            'counterparty',
+            'title',
+            'category',
+            'payment_mode',
+            'amount',
+            'opened_on',
+            'recurring_frequency',
+            'recurring_day_of_month',
+            'recurring_day_of_week',
+            'recurring_starts_on',
+            'recurring_ends_on',
+            'has_interest',
+            'annual_rate_percent',
+            'memo',
+        ])
+
+    def clean(self):
+        cleaned_data = super().clean()
+        opened_on = cleaned_data.get('opened_on')
+        payment_mode = cleaned_data.get('payment_mode') or self.PAYMENT_MODE_ONE_TIME
+        cleaned_data['payment_mode'] = payment_mode
+
+        if payment_mode == self.PAYMENT_MODE_RECURRING:
+            starts_on = cleaned_data.get('recurring_starts_on') or opened_on
+            ends_on = cleaned_data.get('recurring_ends_on')
+            frequency = cleaned_data.get('recurring_frequency') or EventSeries.Frequency.MONTHLY
+            day_of_month = cleaned_data.get('recurring_day_of_month')
+            day_of_week = cleaned_data.get('recurring_day_of_week')
+
+            cleaned_data['recurring_starts_on'] = starts_on
+            cleaned_data['recurring_frequency'] = frequency
+            if starts_on and ends_on and ends_on < starts_on:
+                self.add_error('recurring_ends_on', 'End date cannot be before start date.')
+            if frequency == EventSeries.Frequency.MONTHLY and not day_of_month:
+                self.add_error('recurring_day_of_month', 'Day of month is required for monthly schedules.')
+            if frequency in (EventSeries.Frequency.WEEKLY, EventSeries.Frequency.BIWEEKLY) and day_of_week in (None, ''):
+                self.add_error('recurring_day_of_week', 'Day of week is required for weekly schedules.')
+            if frequency == EventSeries.Frequency.MONTHLY:
+                cleaned_data['recurring_day_of_week'] = None
+            else:
+                cleaned_data['recurring_day_of_month'] = None
+                cleaned_data['recurring_day_of_week'] = _clean_day_of_week(day_of_week)
+
+        if cleaned_data.get('has_interest') and not cleaned_data.get('annual_rate_percent'):
+            self.add_error('annual_rate_percent', 'Interest rate is required when interest is enabled.')
+        return cleaned_data
 
     def get_participants(self):
         counterparty = self.cleaned_data['counterparty']
         if self.cleaned_data['role'] == self.ROLE_LENT:
             return self.user, counterparty
         return counterparty, self.user
+
+    def is_recurring(self):
+        return self.cleaned_data.get('payment_mode') == self.PAYMENT_MODE_RECURRING
+
+    def save_recurring_series(self, obligation):
+        if not self.is_recurring():
+            return None
+
+        series = EventSeries(
+            obligation=obligation,
+            name=self.cleaned_data['title'],
+            event_type=FinancialEvent.EventType.SCHEDULED_CHARGE,
+            frequency=self.cleaned_data['recurring_frequency'],
+            day_of_month=self.cleaned_data.get('recurring_day_of_month'),
+            day_of_week=self.cleaned_data.get('recurring_day_of_week'),
+            starts_on=self.cleaned_data['recurring_starts_on'],
+            ends_on=self.cleaned_data.get('recurring_ends_on'),
+            memo=self.cleaned_data.get('memo', ''),
+        )
+        series.full_clean()
+        series.save()
+
+        version = EventSeriesVersion(
+            event_series=series,
+            amount_units=self.amount_units,
+            valid_from=self.cleaned_data['recurring_starts_on'],
+            memo=self.cleaned_data.get('memo', ''),
+        )
+        version.full_clean()
+        version.save()
+        return series
+
+    def save_interest_rate(self, obligation):
+        if not self.cleaned_data.get('has_interest'):
+            return None
+
+        rate = InterestRatePeriod(
+            obligation=obligation,
+            annual_rate_percent=self.cleaned_data['annual_rate_percent'],
+            effective_from=self.cleaned_data['opened_on'],
+            memo=self.cleaned_data.get('memo', ''),
+        )
+        rate.full_clean()
+        rate.save()
+        return rate
 
 
 class RepaymentForm(MoneyForm):
@@ -133,15 +308,6 @@ class RecurringChargeForm(MoneyForm):
     EVENT_TYPE_CHOICES = (
         (FinancialEvent.EventType.SCHEDULED_CHARGE, 'Scheduled charge - increases debt'),
         (FinancialEvent.EventType.REPAYMENT, 'Automatic repayment - decreases debt'),
-    )
-    DAY_OF_WEEK_CHOICES = (
-        (0, 'Monday'),
-        (1, 'Tuesday'),
-        (2, 'Wednesday'),
-        (3, 'Thursday'),
-        (4, 'Friday'),
-        (5, 'Saturday'),
-        (6, 'Sunday'),
     )
 
     event_type = forms.ChoiceField(
@@ -238,7 +404,7 @@ class RecurringSeriesUpdateForm(forms.ModelForm):
         widget=forms.Textarea(attrs={'rows': 3}),
     )
 
-    day_of_week = forms.ChoiceField(choices=RecurringChargeForm.DAY_OF_WEEK_CHOICES, required=False)
+    day_of_week = forms.ChoiceField(choices=DAY_OF_WEEK_CHOICES, required=False)
 
     class Meta:
         model = EventSeries

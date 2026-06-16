@@ -288,6 +288,29 @@
             background: white;
             color: var(--ink);
         }
+        input[type="checkbox"], input[type="radio"] {
+            width: auto;
+        }
+        [data-field-name="payment_mode"] > div {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 14px;
+        }
+        [data-field-name="payment_mode"] > div label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 0;
+            font-weight: 600;
+        }
+        [data-field-name="has_interest"] {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        [data-field-name="has_interest"] label {
+            margin-bottom: 0;
+        }
         .field-error, .errorlist {
             color: var(--danger);
             margin: 6px 0 0;

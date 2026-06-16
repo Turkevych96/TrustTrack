@@ -29,19 +29,69 @@
 </form>
 <script>
     (() => {
-        const frequency = document.getElementById('id_frequency');
-        const monthField = document.querySelector('[data-field-name="day_of_month"]');
-        const weekField = document.querySelector('[data-field-name="day_of_week"]');
-        if (!frequency || !monthField || !weekField) return;
-
-        const syncScheduleFields = () => {
-            const isMonthly = frequency.value === 'monthly';
-            monthField.hidden = !isMonthly;
-            weekField.hidden = isMonthly;
+        const field = (name) => document.querySelector(`[data-field-name="${name}"]`);
+        const setFieldHidden = (element, hidden) => {
+            element.hidden = hidden;
+            element.querySelectorAll('input, select, textarea').forEach((control) => {
+                control.disabled = hidden;
+            });
         };
 
-        frequency.addEventListener('change', syncScheduleFields);
-        syncScheduleFields();
+        const syncScheduleFields = (frequency, monthField, weekField) => {
+            if (!frequency || !monthField || !weekField) return;
+            const isMonthly = frequency.value === 'monthly';
+            setFieldHidden(monthField, !isMonthly);
+            setFieldHidden(weekField, isMonthly);
+        };
+
+        const bindScheduleFields = (frequencyId, monthFieldName, weekFieldName) => {
+            const frequency = document.getElementById(frequencyId);
+            const monthField = field(monthFieldName);
+            const weekField = field(weekFieldName);
+            if (!frequency || !monthField || !weekField) return () => {};
+
+            const sync = () => syncScheduleFields(frequency, monthField, weekField);
+            frequency.addEventListener('change', sync);
+            sync();
+            return sync;
+        };
+
+        bindScheduleFields('id_frequency', 'day_of_month', 'day_of_week');
+        const syncRecurringScheduleFields = bindScheduleFields(
+            'id_recurring_frequency',
+            'recurring_day_of_month',
+            'recurring_day_of_week',
+        );
+
+        const recurringFields = [
+            'recurring_frequency',
+            'recurring_day_of_month',
+            'recurring_day_of_week',
+            'recurring_starts_on',
+            'recurring_ends_on',
+        ].map(field).filter(Boolean);
+        const paymentModeInputs = Array.from(document.querySelectorAll('input[name="payment_mode"]'));
+        const syncRecurringFields = () => {
+            if (!paymentModeInputs.length) return;
+            const selected = paymentModeInputs.find((input) => input.checked);
+            const isRecurring = selected && selected.value === 'recurring';
+            recurringFields.forEach((element) => {
+                setFieldHidden(element, !isRecurring);
+            });
+            if (isRecurring) syncRecurringScheduleFields();
+        };
+        paymentModeInputs.forEach((input) => input.addEventListener('change', syncRecurringFields));
+        syncRecurringFields();
+
+        const interestToggle = document.getElementById('id_has_interest');
+        const interestRateField = field('annual_rate_percent');
+        if (interestToggle && interestRateField) {
+            const syncInterestField = () => {
+                setFieldHidden(interestRateField, !interestToggle.checked);
+            };
+            interestToggle.addEventListener('change', syncInterestField);
+            syncInterestField();
+        }
     })();
 </script>
 {% endblock %}
