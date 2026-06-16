@@ -648,6 +648,8 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'Repayment')
         self.assertContains(response, 'Obligation settings')
         self.assertContains(response, 'Recalculate balance &amp; interest')
+        self.assertContains(response, 'data-stop-tracking-form')
+        self.assertContains(response, 'name="stop_tracking_confirmation"')
         self.assertNotContains(response, 'Recalculate recurring events')
         self.assertNotContains(response, 'Generate due recurring events')
         self.assertNotContains(response, 'Generate due interest')
@@ -1225,6 +1227,15 @@ class ViewTests(LedgerTestCase):
             ).exists()
         )
 
+    def test_close_obligation_requires_stop_confirmation(self):
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(reverse('ledger:obligation_close', kwargs={'pk': self.obligation.pk}))
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        self.obligation.refresh_from_db()
+        self.assertEqual(self.obligation.status, Obligation.Status.OPEN)
+
     def test_close_obligation_view_stops_tracking_without_deleting_history(self):
         post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
         series = EventSeries.objects.create(
@@ -1235,7 +1246,10 @@ class ViewTests(LedgerTestCase):
         )
         self.client.force_login(self.creditor_user)
 
-        response = self.client.post(reverse('ledger:obligation_close', kwargs={'pk': self.obligation.pk}))
+        response = self.client.post(
+            reverse('ledger:obligation_close', kwargs={'pk': self.obligation.pk}),
+            {'stop_tracking_confirmation': 'STOP'},
+        )
 
         self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
         self.obligation.refresh_from_db()

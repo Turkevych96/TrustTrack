@@ -37,6 +37,7 @@ from ledger.services.recurring import generate_due_recurring_events, recalculate
 
 
 HISTORY_PREVIEW_LIMIT = 10
+STOP_TRACKING_CONFIRMATION = 'STOP'
 
 
 def related_obligations(user):
@@ -505,6 +506,10 @@ def recurring_due_generate(request, pk):
 @require_POST
 def obligation_close(request, pk):
     obligation = get_related_obligation(request.user, pk)
+    if request.POST.get('stop_tracking_confirmation') != STOP_TRACKING_CONFIRMATION:
+        messages.error(request, 'Type STOP to confirm stopping this obligation.')
+        return redirect('ledger:obligation_detail', pk=obligation.pk)
+
     closed_on = timezone.localdate()
     with transaction.atomic():
         obligation.status = Obligation.Status.CLOSED

@@ -29,8 +29,9 @@
                         {% csrf_token %}
                         <button class="menu-item" type="submit">Recalculate balance &amp; interest</button>
                     </form>
-                    <form class="menu-form" method="post" action="{% url 'ledger:obligation_close' obligation.id %}">
+                    <form class="menu-form" method="post" action="{% url 'ledger:obligation_close' obligation.id %}" data-stop-tracking-form>
                         {% csrf_token %}
+                        <input type="hidden" name="stop_tracking_confirmation" value="">
                         <button class="menu-item danger" type="submit">Stop tracking</button>
                     </form>
                 </div>
@@ -124,4 +125,22 @@
 
 {% include "ledger/partials/activity_table.html" %}
 
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    (() => {
+        const form = document.querySelector('[data-stop-tracking-form]');
+        if (!form) return;
+
+        form.addEventListener('submit', (event) => {
+            const confirmation = window.prompt('Type STOP to stop tracking this obligation.');
+            if (confirmation !== 'STOP') {
+                event.preventDefault();
+                return;
+            }
+            form.querySelector('input[name="stop_tracking_confirmation"]').value = confirmation;
+        });
+    })();
+</script>
 {% endblock %}
