@@ -1,0 +1,3 @@
+{% if user.is_superuser %}<span class="badge">Superuser</span>{% endif %}
+{% if user.is_staff %}<span class="badge">Staff</span>{% endif %}
+{% if user.is_active %}<span class="badge">Active</span>{% else %}<span class="badge">Inactive</span>{% endif %}

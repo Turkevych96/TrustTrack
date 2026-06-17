@@ -86,6 +86,46 @@ class SignUpForm(UserCreationForm):
         fields = ('username', 'first_name', 'last_name', 'email')
 
 
+class AdminUserForm(forms.ModelForm):
+    confirm_username = forms.CharField(
+        label='Confirm username',
+        strip=True,
+    )
+
+    class Meta:
+        model = get_user_model()
+        fields = ('username', 'first_name', 'last_name', 'email', 'is_active', 'is_staff')
+        labels = {
+            'is_active': 'Active account',
+            'is_staff': 'Admin access',
+        }
+        help_texts = {
+            'is_active': 'Inactive users cannot log in.',
+            'is_staff': 'Staff users can open the TrustTrack admin panel and Django admin.',
+        }
+
+    def __init__(self, *args, actor=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.actor = actor
+        self.original_username = self.instance.username
+        self.fields['confirm_username'].help_text = f'Type "{self.original_username}" to save changes.'
+
+    def clean_confirm_username(self):
+        confirmation = self.cleaned_data['confirm_username']
+        if confirmation != self.original_username:
+            raise ValidationError('Type the current username to confirm these changes.')
+        return confirmation
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.actor and self.instance.pk == self.actor.pk:
+            if cleaned_data.get('is_active') is False:
+                self.add_error('is_active', 'You cannot deactivate your own account.')
+            if cleaned_data.get('is_staff') is False:
+                self.add_error('is_staff', 'You cannot remove your own admin access.')
+        return cleaned_data
+
+
 class CreateObligationForm(MoneyForm):
     ROLE_LENT = 'lent'
     ROLE_BORROWED = 'borrowed'

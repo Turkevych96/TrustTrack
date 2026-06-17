@@ -7,6 +7,9 @@ app_name = 'ledger'
 
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
+    path('admin-panel/', views.admin_panel, name='admin_panel'),
+    path('admin-panel/users/', views.admin_users, name='admin_users'),
+    path('admin-panel/users/<int:pk>/edit/', views.admin_user_update, name='admin_user_update'),
     path('profile/', views.profile, name='profile'),
     path('planner/', views.planner, name='planner'),
     path('obligations/', views.obligation_list, name='obligation_list'),

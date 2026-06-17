@@ -1,0 +1,77 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}Users - TrustTrack Admin{% endblock %}
+{% block page_class %}admin-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Users</h1>
+        <div class="muted">All TrustTrack accounts.</div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'ledger:admin_panel' %}">Admin</a>
+        <a class="button secondary" href="{% url 'admin:auth_user_changelist' %}">Django admin users</a>
+    </div>
+</div>
+
+<section class="grid admin-metrics">
+    <div class="panel">
+        <div class="metric-label">Total users</div>
+        <div class="metric-value">{{ users|length }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Active</div>
+        <div class="metric-value positive">{{ active_users_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Inactive</div>
+        <div class="metric-value negative">{{ inactive_users_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Admins</div>
+        <div class="metric-value">{{ staff_users_count }}</div>
+    </div>
+</section>
+
+<section class="section-gap">
+    <div class="section-title">
+        <h2>User directory</h2>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Joined</th>
+                    <th>Last login</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                    <tr>
+                        <td>{{ user|user_label }}</td>
+                        <td>{{ user.username }}</td>
+                        <td>{% if user.email %}{{ user.email }}{% else %}<span class="muted">Not set</span>{% endif %}</td>
+                        <td>{% include "ledger/partials/user_status_badges.html" with user=user %}</td>
+                        <td>{{ user.date_joined|date:"M. j, Y" }}</td>
+                        <td>{% if user.last_login %}{{ user.last_login|date:"M. j, Y H:i" }}{% else %}<span class="muted">Never</span>{% endif %}</td>
+                        <td>
+                            <div class="actions">
+                                <a class="button secondary" href="{% url 'ledger:admin_user_update' user.pk %}">Edit</a>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7" class="empty">No users yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

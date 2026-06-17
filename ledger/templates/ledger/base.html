@@ -114,6 +114,47 @@
             grid-template-columns: repeat(3, minmax(0, 1fr));
             margin-bottom: 22px;
         }
+        .admin-page {
+            max-width: 1280px;
+        }
+        .admin-metrics {
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        }
+        .admin-layout {
+            grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.8fr);
+            align-items: start;
+        }
+        .admin-main,
+        .admin-side {
+            min-width: 0;
+        }
+        .admin-tools {
+            display: grid;
+            gap: 8px;
+        }
+        .admin-tool {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            padding: 10px 12px;
+            color: var(--ink);
+        }
+        .admin-tool:hover {
+            background: #eef5f2;
+            text-decoration: none;
+        }
+        .admin-tool strong {
+            display: block;
+            font-size: 14px;
+        }
+        .admin-tool small {
+            display: block;
+            color: var(--muted);
+            margin-top: 2px;
+        }
         .panel {
             background: var(--panel);
             border: 1px solid var(--line);
@@ -439,14 +480,18 @@
         @media (max-width: 760px) {
             .nav, .page-title { flex-direction: column; align-items: stretch; }
             .nav-links, .nav-user { flex-wrap: wrap; }
-            .metrics, .two-col, .settings-grid, .main-side, .simulator-grid { grid-template-columns: 1fr; }
+            .metrics, .admin-metrics, .admin-layout, .two-col, .settings-grid, .main-side, .simulator-grid { grid-template-columns: 1fr; }
             .setting-head { align-items: stretch; flex-direction: column; }
             .setting-summary { grid-template-columns: 1fr; }
             .action-menu-panel { left: 0; right: auto; }
             th, td { white-space: normal; }
         }
         @media (min-width: 761px) and (max-width: 1020px) {
-            .settings-grid { grid-template-columns: 1fr; }
+            .admin-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .admin-layout, .settings-grid { grid-template-columns: 1fr; }
+        }
+        @media (min-width: 1021px) and (max-width: 1240px) {
+            .admin-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         }
     </style>
 </head>
@@ -462,7 +507,7 @@
                     {% endif %}
                     <a href="{% url 'ledger:obligation_list' %}">Obligations</a>
                     {% if request.user.is_staff %}
-                        <a href="{% url 'admin:index' %}">Admin</a>
+                        <a href="{% url 'ledger:admin_panel' %}">Admin</a>
                     {% endif %}
                 </div>
                 <div class="nav-user">

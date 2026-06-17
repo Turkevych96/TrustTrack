@@ -8,13 +8,14 @@ from django.contrib.auth.password_validation import get_default_password_validat
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from ledger.forms import (
+    AdminUserForm,
     CreateObligationForm,
     InterestRecalculateForm,
     InterestRatePeriodForm,
@@ -126,6 +127,90 @@ def password_rule_status(request):
                 if rule_name:
                     rules[rule_name] = False
     return JsonResponse({'rules': rules})
+
+
+@login_required
+def admin_panel(request):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    user_model = get_user_model()
+    users = user_model.objects.all()
+    obligations = Obligation.objects.select_related('borrower', 'creditor', 'category')
+    open_obligations = list(obligations.filter(status=Obligation.Status.OPEN))
+    recent_users = users.order_by('-date_joined')[:5]
+    recent_obligations = obligations.order_by('-created_at')[:6]
+    recent_transactions = (
+        LedgerTransaction.objects.select_related('obligation', 'financial_event')
+        .order_by('-created_at')[:6]
+    )
+
+    return render(
+        request,
+        'ledger/admin_panel.html',
+        {
+            'active_users_count': users.filter(is_active=True).count(),
+            'staff_users_count': users.filter(is_staff=True).count(),
+            'profiles_count': UserProfile.objects.count(),
+            'telegram_profiles_count': UserProfile.objects.filter(telegram_id__isnull=False).count(),
+            'obligations_count': obligations.count(),
+            'open_obligations_count': len(open_obligations),
+            'closed_obligations_count': obligations.filter(status=Obligation.Status.CLOSED).count(),
+            'open_balance_units': sum(get_obligation_balance(obligation) for obligation in open_obligations),
+            'posted_transactions_count': LedgerTransaction.objects.filter(
+                status=LedgerTransaction.Status.POSTED,
+            ).count(),
+            'financial_events_count': FinancialEvent.objects.count(),
+            'recent_users': recent_users,
+            'recent_obligations': recent_obligations,
+            'recent_transactions': recent_transactions,
+        },
+    )
+
+
+@login_required
+def admin_users(request):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    user_model = get_user_model()
+    users = user_model.objects.all().order_by('username')
+    return render(
+        request,
+        'ledger/admin_users.html',
+        {
+            'users': users,
+            'active_users_count': users.filter(is_active=True).count(),
+            'staff_users_count': users.filter(is_staff=True).count(),
+            'inactive_users_count': users.filter(is_active=False).count(),
+        },
+    )
+
+
+@login_required
+def admin_user_update(request, pk):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    user_model = get_user_model()
+    target_user = get_object_or_404(user_model, pk=pk)
+    if request.method == 'POST':
+        form = AdminUserForm(request.POST, instance=target_user, actor=request.user)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'User {target_user.username} was updated.')
+            return redirect('ledger:admin_users')
+    else:
+        form = AdminUserForm(instance=target_user, actor=request.user)
+
+    return render(
+        request,
+        'ledger/admin_user_form.html',
+        {
+            'form': form,
+            'target_user': target_user,
+        },
+    )
 
 
 @login_required

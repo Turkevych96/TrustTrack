@@ -1,0 +1,175 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}Admin - TrustTrack{% endblock %}
+{% block page_class %}admin-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Admin</h1>
+        <div class="muted">TrustTrack operations overview.</div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'admin:index' %}">Django admin</a>
+        <a class="button" href="{% url 'ledger:obligation_create' %}">New obligation</a>
+    </div>
+</div>
+
+<section class="grid admin-metrics">
+    <div class="panel">
+        <div class="metric-label">Active users</div>
+        <div class="metric-value">{{ active_users_count }}</div>
+        <div class="muted">{{ staff_users_count }} staff</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Profiles</div>
+        <div class="metric-value">{{ profiles_count }}</div>
+        <div class="muted">{{ telegram_profiles_count }} with Telegram</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Obligations</div>
+        <div class="metric-value">{{ obligations_count }}</div>
+        <div class="muted">{{ open_obligations_count }} open, {{ closed_obligations_count }} closed</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Open balance</div>
+        <div class="metric-value">{{ open_balance_units|money_units }}</div>
+        <div class="muted">Across open obligations</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Posted transactions</div>
+        <div class="metric-value">{{ posted_transactions_count }}</div>
+        <div class="muted">Ledger activity</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Financial events</div>
+        <div class="metric-value">{{ financial_events_count }}</div>
+        <div class="muted">Manual and generated</div>
+    </div>
+</section>
+
+<section class="grid admin-layout section-gap">
+    <div class="admin-main">
+        <div class="section-title">
+            <h2>Recent users</h2>
+            <a href="{% url 'ledger:admin_users' %}">View all users</a>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Username</th>
+                        <th>Status</th>
+                        <th>Joined</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in recent_users %}
+                        <tr>
+                            <td>{{ user|user_label }}</td>
+                            <td>{{ user.username }}</td>
+                            <td>{% include "ledger/partials/user_status_badges.html" with user=user %}</td>
+                            <td>{{ user.date_joined|date:"M. j, Y" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="4" class="empty">No users yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section-title section-gap">
+            <h2>Recent obligations</h2>
+            <a href="{% url 'admin:ledger_obligation_changelist' %}">Manage obligations</a>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Status</th>
+                        <th>Borrower</th>
+                        <th>Creditor</th>
+                        <th>Opened</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for obligation in recent_obligations %}
+                        <tr>
+                            <td><a href="{% url 'ledger:obligation_detail' obligation.pk %}">{{ obligation.title }}</a></td>
+                            <td><span class="badge">{{ obligation.get_status_display }}</span></td>
+                            <td>{{ obligation.borrower|user_label }}</td>
+                            <td>{{ obligation.creditor|user_label }}</td>
+                            <td>{{ obligation.opened_on }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="5" class="empty">No obligations yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <aside class="admin-side">
+        <section class="panel admin-tools">
+            <h2>Admin tools</h2>
+            <a class="admin-tool" href="{% url 'admin:index' %}">
+                <span>
+                    <strong>Django admin</strong>
+                    <small>Low-level model maintenance</small>
+                </span>
+                <span aria-hidden="true">&rarr;</span>
+            </a>
+            <a class="admin-tool" href="{% url 'ledger:admin_users' %}">
+                <span>
+                    <strong>Users</strong>
+                    <small>Directory and account editing</small>
+                </span>
+                <span aria-hidden="true">&rarr;</span>
+            </a>
+            <a class="admin-tool" href="{% url 'admin:ledger_userprofile_changelist' %}">
+                <span>
+                    <strong>Profiles</strong>
+                    <small>Telegram and module settings</small>
+                </span>
+                <span aria-hidden="true">&rarr;</span>
+            </a>
+            <a class="admin-tool" href="{% url 'admin:ledger_obligationcategory_changelist' %}">
+                <span>
+                    <strong>Categories</strong>
+                    <small>Obligation category list</small>
+                </span>
+                <span aria-hidden="true">&rarr;</span>
+            </a>
+        </section>
+
+        <section class="section-gap">
+            <h2>Recent transactions</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Obligation</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for transaction in recent_transactions %}
+                            <tr>
+                                <td>{{ transaction.transaction_date }}</td>
+                                <td>{{ transaction.get_transaction_type_display }}</td>
+                                <td><a href="{% url 'ledger:obligation_detail' transaction.obligation_id %}">{{ transaction.obligation.title }}</a></td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="3" class="empty">No transactions yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </aside>
+</section>
+{% endblock %}

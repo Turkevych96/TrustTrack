@@ -1,0 +1,55 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}Edit user - TrustTrack Admin{% endblock %}
+{% block page_class %}form-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Edit user</h1>
+        <div class="muted">{{ target_user.username }}</div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'ledger:admin_users' %}">Users</a>
+        <a class="button secondary" href="{% url 'admin:auth_user_change' target_user.pk %}">Django admin user</a>
+    </div>
+</div>
+
+<div class="panel setting-panel">
+    <div class="setting-summary">
+        <div>
+            <div class="metric-label">Current display name</div>
+            <div class="setting-value">{{ target_user|user_label }}</div>
+        </div>
+        <div>
+            <div class="metric-label">Status</div>
+            <div>{% include "ledger/partials/user_status_badges.html" with user=target_user %}</div>
+        </div>
+    </div>
+</div>
+
+<form class="panel form-grid section-gap" method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+        <div data-field-name="{{ field.name }}">
+            {% if field.field.widget.input_type == "checkbox" %}
+                <label>
+                    {{ field }}
+                    {{ field.label }}
+                </label>
+            {% else %}
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+            {% endif %}
+            {% if field.help_text %}<div class="muted">{{ field.help_text }}</div>{% endif %}
+            {{ field.errors }}
+        </div>
+    {% endfor %}
+    <div class="actions">
+        <button class="button" type="submit">Save user</button>
+        <a class="button secondary" href="{% url 'ledger:admin_users' %}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

@@ -1177,8 +1177,103 @@ class ViewTests(LedgerTestCase):
         staff_response = self.client.get(reverse('ledger:dashboard'))
 
         self.assertContains(staff_response, 'New obligation', count=1)
-        self.assertContains(staff_response, reverse('admin:index'))
+        self.assertContains(staff_response, reverse('ledger:admin_panel'))
+        self.assertNotContains(staff_response, reverse('admin:index'))
         self.assertContains(staff_response, 'Admin')
+
+    def test_admin_panel_is_staff_only_and_links_to_django_admin(self):
+        self.client.force_login(self.borrower_user)
+
+        forbidden_response = self.client.get(reverse('ledger:admin_panel'))
+
+        self.assertEqual(forbidden_response.status_code, 403)
+
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        response = self.client.get(reverse('ledger:admin_panel'))
+
+        self.assertContains(response, 'TrustTrack operations overview')
+        self.assertContains(response, reverse('ledger:admin_users'))
+        self.assertContains(response, reverse('admin:index'))
+        self.assertContains(response, 'Django admin')
+
+    def test_admin_users_page_lists_users_and_links_to_edit(self):
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        response = self.client.get(reverse('ledger:admin_users'))
+
+        self.assertContains(response, 'User directory')
+        self.assertContains(response, self.creditor_user.username)
+        self.assertContains(response, self.borrower_user.username)
+        self.assertContains(response, reverse('ledger:admin_user_update', kwargs={'pk': self.borrower_user.pk}))
+
+    def test_admin_user_edit_requires_confirmation(self):
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        response = self.client.post(
+            reverse('ledger:admin_user_update', kwargs={'pk': self.borrower_user.pk}),
+            {
+                'username': self.borrower_user.username,
+                'first_name': 'Updated',
+                'last_name': 'Borrower',
+                'email': 'updated@example.com',
+                'is_active': 'on',
+                'confirm_username': 'wrong',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Type the current username')
+        self.borrower_user.refresh_from_db()
+        self.assertNotEqual(self.borrower_user.first_name, 'Updated')
+
+    def test_admin_user_edit_saves_after_confirmation(self):
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        response = self.client.post(
+            reverse('ledger:admin_user_update', kwargs={'pk': self.borrower_user.pk}),
+            {
+                'username': self.borrower_user.username,
+                'first_name': 'Updated',
+                'last_name': 'Borrower',
+                'email': 'updated@example.com',
+                'is_active': 'on',
+                'is_staff': 'on',
+                'confirm_username': self.borrower_user.username,
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:admin_users'))
+        self.borrower_user.refresh_from_db()
+        self.assertEqual(self.borrower_user.get_full_name(), 'Updated Borrower')
+        self.assertEqual(self.borrower_user.email, 'updated@example.com')
+        self.assertTrue(self.borrower_user.is_staff)
+
+    def test_admin_user_edit_does_not_allow_self_lockout(self):
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        response = self.client.post(
+            reverse('ledger:admin_user_update', kwargs={'pk': staff_user.pk}),
+            {
+                'username': staff_user.username,
+                'first_name': '',
+                'last_name': '',
+                'email': '',
+                'confirm_username': staff_user.username,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'You cannot deactivate your own account.')
+        self.assertContains(response, 'You cannot remove your own admin access.')
+        staff_user.refresh_from_db()
+        self.assertTrue(staff_user.is_active)
+        self.assertTrue(staff_user.is_staff)
 
     def test_nav_can_hide_planner_from_profile_preferences(self):
         UserProfile.objects.create(user=self.borrower_user, show_planner_module=False)
