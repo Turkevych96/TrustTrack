@@ -31,6 +31,10 @@ class ObligationCategory(TimestampedModel):
 
 
 class UserProfile(TimestampedModel):
+    class TelegramLanguage(models.TextChoices):
+        ENGLISH = 'en', 'English'
+        RUSSIAN = 'ru', 'Russian'
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -49,6 +53,11 @@ class UserProfile(TimestampedModel):
     telegram_title = models.CharField(max_length=255, blank=True)
     telegram_lookup_error = models.CharField(max_length=255, blank=True)
     telegram_checked_at = models.DateTimeField(null=True, blank=True)
+    telegram_language = models.CharField(
+        max_length=2,
+        choices=TelegramLanguage.choices,
+        default=TelegramLanguage.ENGLISH,
+    )
     show_planner_module = models.BooleanField(default=True)
     show_dashboard_balance_history = models.BooleanField(default=True)
 

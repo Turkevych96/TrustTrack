@@ -191,6 +191,81 @@ class TelegramBotTests(LedgerTestCase):
             ],
         )
 
+    def test_settings_switches_telegram_language_to_russian(self):
+        profile = UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+
+        settings = process_telegram_update(self._telegram_message('/settings', telegram_id=555))
+        switched = process_telegram_update(self._telegram_callback('settings:lang:ru', telegram_id=555))
+        profile.refresh_from_db()
+        start = process_telegram_update(
+            self._telegram_message('/start', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+
+        self.assertIn('Settings', settings.messages[0].text)
+        self.assertEqual(
+            settings.messages[0].reply_markup['inline_keyboard'][0],
+            [
+                {'text': 'English', 'callback_data': 'settings:lang:en'},
+                {'text': 'Russian', 'callback_data': 'settings:lang:ru'},
+            ],
+        )
+        self.assertEqual(profile.telegram_language, UserProfile.TelegramLanguage.RUSSIAN)
+        self.assertTrue(switched.messages[0].replace_existing)
+        self.assertEqual(switched.callback_text, 'Язык обновлён.')
+        self.assertIn('Настройки', switched.messages[0].text)
+        self.assertIn('Текущий язык: русский', switched.messages[0].text)
+        self.assertIn('Пользователь: Andrii', start.messages[0].text)
+        self.assertIn('Я должен: $0.00', start.messages[0].text)
+        self.assertEqual(
+            start.messages[0].reply_markup['inline_keyboard'],
+            [
+                [{'text': 'Баланс', 'callback_data': 'menu:balance'}],
+                [{'text': 'Открытые обязательства', 'callback_data': 'menu:obligations'}],
+                [{'text': 'Последние операции', 'callback_data': 'menu:recent'}],
+            ],
+        )
+
+    def test_russian_language_localizes_telegram_panels(self):
+        UserProfile.objects.create(
+            user=self.borrower_user,
+            telegram_id=555,
+            telegram_language=UserProfile.TelegramLanguage.RUSSIAN,
+        )
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        post_repayment(self.obligation, amount_units=250_000, event_date=date(2026, 1, 10))
+
+        obligations = process_telegram_update(
+            self._telegram_callback('menu:obligations', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+        detail = process_telegram_update(
+            self._telegram_callback(f'ob:{self.obligation.pk}', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+        recent = process_telegram_update(
+            self._telegram_callback('menu:recent', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+        group_warning = process_telegram_update(
+            self._telegram_message('/start', telegram_id=555, chat_id=-100, chat_type='group'),
+        )
+
+        self.assertIn('Открытые обязательства', obligations.messages[0].text)
+        self.assertEqual(
+            obligations.messages[0].reply_markup['inline_keyboard'][-2],
+            [{'text': 'Новое обязательство', 'callback_data': 'menu:new_obligation'}],
+        )
+        self.assertIn('Роль: заёмщик', detail.messages[0].text)
+        self.assertIn('Текущий баланс: $75.00', detail.messages[0].text)
+        self.assertEqual(
+            detail.messages[0].reply_markup['inline_keyboard'][0][0],
+            {'text': 'Добавить погашение', 'callback_data': f'repaymenu:{self.obligation.pk}'},
+        )
+        self.assertIn('Последние операции', recent.messages[0].text)
+        self.assertIn('Погашение', recent.messages[0].text)
+        self.assertIn('личном чате', group_warning.messages[0].text)
+
     def test_home_button_edits_existing_panel(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
         post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))

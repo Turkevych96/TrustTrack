@@ -30,7 +30,7 @@ class ObligationCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'telegram_id', 'telegram_username', 'telegram_checked_at')
+    list_display = ('user', 'telegram_id', 'telegram_username', 'telegram_language', 'telegram_checked_at')
     search_fields = (
         'user__username',
         'user__first_name',
