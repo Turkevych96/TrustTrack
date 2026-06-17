@@ -98,6 +98,33 @@ http://127.0.0.1:8000/admin/
 
 Use the admin username and password created with `createsuperuser`.
 
+## Run The Local Site And Telegram Bot
+
+For the local family setup, TrustTrack can run the Django site and Telegram polling bot together without exposing the site to the internet.
+
+Make sure `.env` contains `TELEGRAM_BOT_TOKEN`, and each allowed user has their Telegram ID saved in Profile.
+
+Start both processes with one foreground command:
+
+```bash
+uv run python manage.py run_trusttrack
+```
+
+On Windows, start the local stack in the background with logs:
+
+```powershell
+.\scripts\start-trusttrack.ps1
+```
+
+Check or stop it:
+
+```powershell
+.\scripts\status-trusttrack.ps1 -Tail 20
+.\scripts\stop-trusttrack.ps1
+```
+
+The site stays local at `http://127.0.0.1:8000/`. The bot uses Telegram polling and only responds to Telegram IDs saved in TrustTrack profiles.
+
 ## Local Development Notes
 
 - Keep `db.sqlite3` local.

@@ -35,6 +35,7 @@ from ledger.services.recurring import (
     recalculate_due_recurring_events,
 )
 from ledger.services.telegram import TelegramChatIdentity
+from ledger.services.telegram_bot import PENDING_REPAYMENT_OBLIGATIONS, process_telegram_update
 from ledger.templatetags.money import money_units
 
 
@@ -148,6 +149,190 @@ class BalanceTests(LedgerTestCase):
 
         with self.assertRaises(ValidationError):
             post_repayment(self.obligation, amount_units=1_250_000, event_date=date(2026, 1, 10))
+
+
+class TelegramBotTests(LedgerTestCase):
+    def tearDown(self):
+        PENDING_REPAYMENT_OBLIGATIONS.clear()
+        super().tearDown()
+
+    def test_start_requires_profile_telegram_id(self):
+        result = process_telegram_update(self._telegram_message('/start', telegram_id=555))
+
+        self.assertEqual(len(result.messages), 1)
+        self.assertIn('Access is not configured', result.messages[0].text)
+        self.assertIn('555', result.messages[0].text)
+
+    def test_start_shows_obligation_codes_for_authorized_user(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+
+        result = process_telegram_update(
+            self._telegram_message('/start', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+
+        self.assertEqual(len(result.messages), 1)
+        self.assertIn('TrustTrack access confirmed', result.messages[0].text)
+        self.assertIn(f'O{self.obligation.pk}', result.messages[0].text)
+        self.assertNotIn('/start -', result.messages[0].text)
+        self.assertIn('$100.00', result.messages[0].text)
+        self.assertEqual(
+            result.messages[0].reply_markup['inline_keyboard'],
+            [
+                [{'text': 'Balance', 'callback_data': 'menu:balance'}],
+                [{'text': 'Open obligations', 'callback_data': 'menu:obligations'}],
+            ],
+        )
+
+    def test_obligation_buttons_open_detail_and_repayment_amounts(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+
+        list_result = process_telegram_update(
+            self._telegram_callback('menu:obligations', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+        detail_result = process_telegram_update(
+            self._telegram_callback(f'ob:{self.obligation.pk}', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+        repayment_menu_result = process_telegram_update(
+            self._telegram_callback(f'repaymenu:{self.obligation.pk}', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+
+        self.assertEqual(
+            list_result.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
+            f'ob:{self.obligation.pk}',
+        )
+        self.assertIn('Current balance: $100.00', detail_result.messages[0].text)
+        self.assertEqual(
+            detail_result.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
+            f'repaymenu:{self.obligation.pk}',
+        )
+        repayment_buttons = repayment_menu_result.messages[0].reply_markup['inline_keyboard']
+        self.assertIn({'text': 'Pay $25.00', 'callback_data': f'repayamt:{self.obligation.pk}:250000'}, repayment_buttons[0])
+        self.assertEqual(
+            repayment_buttons[-2][0],
+            {'text': 'Custom amount', 'callback_data': f'customrepay:{self.obligation.pk}'},
+        )
+
+    def test_repayment_amount_button_opens_confirmation(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+
+        result = process_telegram_update(
+            self._telegram_callback(f'repayamt:{self.obligation.pk}:250000', telegram_id=555),
+            today=date(2026, 1, 10),
+            nonce_factory=lambda: 'fixed',
+        )
+
+        self.assertIn('Confirm repayment', result.messages[0].text)
+        self.assertEqual(
+            result.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
+            f'repay:{self.obligation.pk}:250000:2026-01-10:fixed',
+        )
+
+    def test_custom_repayment_amount_uses_selected_obligation(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+
+        custom_prompt = process_telegram_update(
+            self._telegram_callback(f'customrepay:{self.obligation.pk}', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+        confirmation = process_telegram_update(
+            self._telegram_message('37.50', telegram_id=555),
+            today=date(2026, 1, 10),
+            nonce_factory=lambda: 'custom',
+        )
+
+        self.assertIn('Send only the amount', custom_prompt.messages[0].text)
+        self.assertIn('Confirm repayment', confirmation.messages[0].text)
+        self.assertIn('Amount: $37.50', confirmation.messages[0].text)
+        self.assertEqual(
+            confirmation.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
+            f'repay:{self.obligation.pk}:375000:2026-01-10:custom',
+        )
+        self.assertNotIn(555, PENDING_REPAYMENT_OBLIGATIONS)
+
+    def test_repayment_preview_requires_confirmation_button(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+
+        result = process_telegram_update(
+            self._telegram_message(f'/repay O{self.obligation.pk} 25', telegram_id=555),
+            today=date(2026, 1, 10),
+            nonce_factory=lambda: 'fixed',
+        )
+
+        self.assertEqual(get_obligation_balance(self.obligation), 1_000_000)
+        self.assertEqual(len(result.messages), 1)
+        self.assertIn('Confirm repayment', result.messages[0].text)
+        self.assertEqual(
+            result.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
+            f'repay:{self.obligation.pk}:250000:2026-01-10:fixed',
+        )
+
+    def test_repayment_callback_posts_once(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        update = self._telegram_callback(
+            f'repay:{self.obligation.pk}:250000:2026-01-10:nonce',
+            telegram_id=555,
+        )
+
+        first_result = process_telegram_update(update, today=date(2026, 1, 10))
+        second_result = process_telegram_update(update, today=date(2026, 1, 10))
+
+        self.assertEqual(get_obligation_balance(self.obligation), 750_000)
+        self.assertIn('Repayment recorded', first_result.messages[0].text)
+        self.assertIn('already recorded', second_result.messages[0].text)
+        self.assertEqual(LedgerTransaction.objects.filter(idempotency_key__startswith='telegram-repayment:').count(), 1)
+
+    def test_group_chat_does_not_expose_financial_data(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+
+        result = process_telegram_update(
+            self._telegram_message('/start', telegram_id=555, chat_id=-100, chat_type='group'),
+        )
+
+        self.assertEqual(len(result.messages), 1)
+        self.assertIn('private chat', result.messages[0].text)
+        self.assertNotIn(self.obligation.title, result.messages[0].text)
+
+    def _telegram_message(self, text, telegram_id=555, chat_id=None, chat_type='private'):
+        return {
+            'message': {
+                'chat': {
+                    'id': telegram_id if chat_id is None else chat_id,
+                    'type': chat_type,
+                },
+                'from': {
+                    'id': telegram_id,
+                },
+                'text': text,
+            },
+        }
+
+    def _telegram_callback(self, data, telegram_id=555, chat_id=None, chat_type='private'):
+        return {
+            'callback_query': {
+                'id': 'callback-1',
+                'from': {
+                    'id': telegram_id,
+                },
+                'message': {
+                    'chat': {
+                        'id': telegram_id if chat_id is None else chat_id,
+                        'type': chat_type,
+                    },
+                },
+                'data': data,
+            },
+        }
 
 
 class RecurringTests(LedgerTestCase):

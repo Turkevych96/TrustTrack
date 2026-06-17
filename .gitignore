@@ -20,6 +20,7 @@ env/
 
 # Django
 *.log
+.run/
 local_settings.py
 *.sqlite3
 *.sqlite
