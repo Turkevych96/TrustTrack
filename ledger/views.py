@@ -374,6 +374,7 @@ def obligation_create(request):
                     )
                     form.save_recurring_series(obligation)
                     form.save_interest_rate(obligation)
+                    recalculate_obligation(obligation)
                 return redirect('ledger:obligation_detail', pk=obligation.pk)
             except ValidationError as error:
                 form.add_error(None, error)

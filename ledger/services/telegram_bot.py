@@ -22,6 +22,7 @@ from ledger.models import (
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import post_principal_advance, post_repayment
 from ledger.services.money import decimal_from_units, units_from_decimal
+from ledger.services.recalculation import recalculate_obligation
 
 
 QUICK_REPAYMENT_AMOUNTS = (Decimal('25'), Decimal('50'), Decimal('100'))
@@ -1174,6 +1175,7 @@ def _create_obligation_from_context(user, context, lang=LANG_EN):
         )
         _create_recurring_series_from_context(obligation, context)
         _create_interest_rate_from_context(obligation, context)
+        recalculate_obligation(obligation)
     return obligation
 
 

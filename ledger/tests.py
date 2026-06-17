@@ -378,6 +378,40 @@ class TelegramBotTests(LedgerTestCase):
         self.assertEqual(series.day_of_month, 1)
         self.assertEqual(rate.annual_rate_percent, Decimal('3.5'))
 
+    def test_new_obligation_recalculates_backdated_recurring_and_interest(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+
+        process_telegram_update(self._telegram_callback('menu:new_obligation', telegram_id=555))
+        process_telegram_update(self._telegram_callback('newob:role:borrowed', telegram_id=555))
+        process_telegram_update(self._telegram_callback(f'newob:cp:{self.creditor_user.pk}', telegram_id=555))
+        process_telegram_update(self._telegram_message('Backdated rent', telegram_id=555))
+        process_telegram_update(self._telegram_message('100.00', telegram_id=555))
+        process_telegram_update(self._telegram_callback('newob:date:custom', telegram_id=555))
+        process_telegram_update(self._telegram_message('01/10/2026', telegram_id=555))
+        process_telegram_update(self._telegram_callback('newob:schedule:monthly', telegram_id=555))
+        process_telegram_update(self._telegram_callback('newob:dom:1', telegram_id=555))
+        process_telegram_update(self._telegram_callback('newob:interest:yes', telegram_id=555))
+        process_telegram_update(self._telegram_message('3.5', telegram_id=555))
+        with patch('ledger.services.recalculation.timezone.localdate', return_value=date(2026, 4, 15)):
+            created = process_telegram_update(self._telegram_callback('newob:create', telegram_id=555))
+
+        obligation = Obligation.objects.get(title='Backdated rent')
+        generated_events = FinancialEvent.objects.filter(
+            obligation=obligation,
+            source=FinancialEvent.Source.GENERATED,
+            event_series__isnull=False,
+            voided_at__isnull=True,
+        )
+        posted_interest = InterestAccrualRun.objects.filter(
+            obligation=obligation,
+            status=InterestAccrualRun.Status.POSTED,
+        )
+
+        self.assertIn('Obligation created', created.messages[0].text)
+        self.assertEqual(generated_events.count(), 3)
+        self.assertEqual(posted_interest.count(), 3)
+        self.assertGreater(get_obligation_balance(obligation), 4_000_000)
+
     def test_obligation_buttons_open_detail_and_repayment_amounts(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
         post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
@@ -1671,33 +1705,34 @@ class ViewTests(LedgerTestCase):
         self.assertFalse(obligation.event_series.exists())
         self.assertFalse(obligation.interest_rate_periods.exists())
 
-    def test_create_recurring_obligation_creates_initial_principal_and_series(self):
+    def test_create_recurring_obligation_recalculates_due_events_after_create(self):
         user_model = get_user_model()
         counterparty = user_model.objects.create_user(username='maria')
         self.client.force_login(self.creditor_user)
 
-        response = self.client.post(
-            reverse('ledger:obligation_create'),
-            {
-                'role': 'lent',
-                'counterparty': counterparty.pk,
-                'title': 'Monthly rent',
-                'category': '',
-                'payment_mode': 'recurring',
-                'opened_on': '2026-02-01',
-                'amount': '1000.00',
-                'recurring_frequency': EventSeries.Frequency.MONTHLY,
-                'recurring_day_of_month': '5',
-                'recurring_day_of_week': '',
-                'recurring_starts_on': '2026-03-05',
-                'recurring_ends_on': '',
-                'memo': 'Rent schedule',
-            },
-        )
+        with patch('ledger.services.recalculation.timezone.localdate', return_value=date(2026, 6, 17)):
+            response = self.client.post(
+                reverse('ledger:obligation_create'),
+                {
+                    'role': 'lent',
+                    'counterparty': counterparty.pk,
+                    'title': 'Monthly rent',
+                    'category': '',
+                    'payment_mode': 'recurring',
+                    'opened_on': '2026-02-01',
+                    'amount': '1000.00',
+                    'recurring_frequency': EventSeries.Frequency.MONTHLY,
+                    'recurring_day_of_month': '5',
+                    'recurring_day_of_week': '',
+                    'recurring_starts_on': '2026-03-05',
+                    'recurring_ends_on': '',
+                    'memo': 'Rent schedule',
+                },
+            )
 
         obligation = Obligation.objects.get(title='Monthly rent')
         self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}))
-        self.assertEqual(get_obligation_balance(obligation), 10_000_000)
+        self.assertEqual(get_obligation_balance(obligation), 50_000_000)
 
         series = obligation.event_series.get()
         version = series.versions.get()
@@ -1707,6 +1742,15 @@ class ViewTests(LedgerTestCase):
         self.assertEqual(series.starts_on, date(2026, 3, 5))
         self.assertEqual(version.amount_units, 10_000_000)
         self.assertEqual(version.valid_from, date(2026, 3, 5))
+        self.assertEqual(
+            FinancialEvent.objects.filter(
+                obligation=obligation,
+                source=FinancialEvent.Source.GENERATED,
+                event_series=series,
+                voided_at__isnull=True,
+            ).count(),
+            4,
+        )
 
     def test_create_obligation_can_add_initial_interest_rate(self):
         user_model = get_user_model()
