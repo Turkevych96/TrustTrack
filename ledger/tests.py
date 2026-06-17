@@ -219,6 +219,7 @@ class TelegramBotTests(LedgerTestCase):
         self.assertIn('Recent transactions', result.messages[0].text)
         self.assertIn('Test loan', result.messages[0].text)
         self.assertIn('Repayment', result.messages[0].text)
+        self.assertIn('01/10/2026', result.messages[0].text)
         self.assertIn('+$25.00', result.messages[0].text)
         self.assertIn('-$100.00', result.messages[0].text)
 
@@ -229,7 +230,7 @@ class TelegramBotTests(LedgerTestCase):
         role = process_telegram_update(self._telegram_callback('newob:role:lent', telegram_id=555))
         counterparty = process_telegram_update(self._telegram_callback(f'newob:cp:{self.creditor_user.pk}', telegram_id=555))
         title = process_telegram_update(self._telegram_message('Phone', telegram_id=555))
-        amount = process_telegram_update(self._telegram_message('125.00', telegram_id=555))
+        amount = process_telegram_update(self._telegram_message('125,00', telegram_id=555))
         opened = process_telegram_update(
             self._telegram_callback('newob:date:today', telegram_id=555),
             today=date(2026, 1, 10),
@@ -244,6 +245,7 @@ class TelegramBotTests(LedgerTestCase):
         self.assertIn('Send initial amount', title.messages[0].text)
         self.assertIn('Choose opened date', amount.messages[0].text)
         self.assertIn('Choose payment schedule', opened.messages[0].text)
+        self.assertIn('Opened: 01/10/2026', opened.messages[0].text)
         self.assertIn('Add interest', schedule.messages[0].text)
         self.assertIn('Create obligation?', interest.messages[0].text)
         self.assertIn('Obligation created', created.messages[0].text)
@@ -253,6 +255,24 @@ class TelegramBotTests(LedgerTestCase):
         self.assertEqual(obligation.borrower, self.creditor_user)
         self.assertEqual(get_obligation_balance(obligation), 1_250_000)
         self.assertNotIn(555, PENDING_OBLIGATION_CREATIONS)
+
+    def test_new_obligation_custom_date_uses_american_format(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+
+        process_telegram_update(self._telegram_callback('menu:new_obligation', telegram_id=555))
+        process_telegram_update(self._telegram_callback('newob:role:lent', telegram_id=555))
+        process_telegram_update(self._telegram_callback(f'newob:cp:{self.creditor_user.pk}', telegram_id=555))
+        process_telegram_update(self._telegram_message('Camera', telegram_id=555))
+        process_telegram_update(self._telegram_message('125.00', telegram_id=555))
+        prompt = process_telegram_update(self._telegram_callback('newob:date:custom', telegram_id=555))
+        schedule = process_telegram_update(
+            self._telegram_message('01/10/2026', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+
+        self.assertIn('Send opened date as MM/DD/YYYY', prompt.messages[0].text)
+        self.assertIn('Choose payment schedule', schedule.messages[0].text)
+        self.assertIn('Opened: 01/10/2026', schedule.messages[0].text)
 
     def test_new_obligation_wizard_creates_monthly_interest_obligation(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
@@ -269,7 +289,7 @@ class TelegramBotTests(LedgerTestCase):
         process_telegram_update(self._telegram_callback('newob:schedule:monthly', telegram_id=555))
         process_telegram_update(self._telegram_callback('newob:dom:1', telegram_id=555))
         process_telegram_update(self._telegram_callback('newob:interest:yes', telegram_id=555))
-        confirmation = process_telegram_update(self._telegram_message('3.5', telegram_id=555))
+        confirmation = process_telegram_update(self._telegram_message('3,5', telegram_id=555))
         created = process_telegram_update(self._telegram_callback('newob:create', telegram_id=555))
 
         obligation = Obligation.objects.get(title='Telegram rent')
@@ -350,6 +370,7 @@ class TelegramBotTests(LedgerTestCase):
         self.assertTrue(result.messages[0].replace_existing)
         self.assertEqual(result.messages[0].message_id, 99)
         self.assertNotIn(f'O{self.obligation.pk}', result.messages[0].text)
+        self.assertIn('Date: 01/10/2026', result.messages[0].text)
         self.assertEqual(
             result.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
             f'repay:{self.obligation.pk}:250000:2026-01-10:fixed',
@@ -376,12 +397,35 @@ class TelegramBotTests(LedgerTestCase):
         self.assertTrue(confirmation.messages[0].replace_existing)
         self.assertEqual(confirmation.messages[0].message_id, 99)
         self.assertIn('Amount: $37.50', confirmation.messages[0].text)
+        self.assertIn('Date: 01/10/2026', confirmation.messages[0].text)
         self.assertNotIn(f'O{self.obligation.pk}', confirmation.messages[0].text)
         self.assertEqual(
             confirmation.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
             f'repay:{self.obligation.pk}:375000:2026-01-10:custom',
         )
         self.assertNotIn(555, PENDING_REPAYMENT_OBLIGATIONS)
+
+    def test_custom_repayment_amount_accepts_single_decimal_comma(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+
+        process_telegram_update(
+            self._telegram_callback(f'customrepay:{self.obligation.pk}', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+        confirmation = process_telegram_update(
+            self._telegram_message('54,50', telegram_id=555),
+            today=date(2026, 1, 10),
+            nonce_factory=lambda: 'comma',
+        )
+
+        self.assertIn('Confirm repayment', confirmation.messages[0].text)
+        self.assertIn('Amount: $54.50', confirmation.messages[0].text)
+        self.assertIn('Date: 01/10/2026', confirmation.messages[0].text)
+        self.assertEqual(
+            confirmation.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
+            f'repay:{self.obligation.pk}:545000:2026-01-10:comma',
+        )
 
     def test_repayment_preview_requires_confirmation_button(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
@@ -397,6 +441,7 @@ class TelegramBotTests(LedgerTestCase):
         self.assertEqual(len(result.messages), 1)
         self.assertIn('Confirm repayment', result.messages[0].text)
         self.assertNotIn(f'O{self.obligation.pk}', result.messages[0].text)
+        self.assertIn('Date: 01/10/2026', result.messages[0].text)
         self.assertEqual(
             result.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
             f'repay:{self.obligation.pk}:250000:2026-01-10:fixed',
@@ -416,6 +461,7 @@ class TelegramBotTests(LedgerTestCase):
         self.assertEqual(get_obligation_balance(self.obligation), 750_000)
         self.assertIn('Repayment recorded', first_result.messages[0].text)
         self.assertTrue(first_result.messages[0].replace_existing)
+        self.assertIn('Date: 01/10/2026', first_result.messages[0].text)
         self.assertNotIn(f'O{self.obligation.pk}', first_result.messages[0].text)
         self.assertIn('already recorded', second_result.messages[0].text)
         self.assertTrue(second_result.messages[0].replace_existing)

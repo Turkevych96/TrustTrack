@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import secrets
 import shlex
@@ -350,7 +350,7 @@ def _recent_transactions_text(user):
         event = transaction_item.financial_event
         lines.append(
             ' - '.join([
-                transaction_item.transaction_date.isoformat(),
+                _format_date(transaction_item.transaction_date),
                 transaction_item.obligation.title,
                 event.get_event_type_display(),
                 _format_signed_money(_event_user_net_impact_units(user, event, transaction_item.obligation)),
@@ -442,7 +442,7 @@ def _pending_repayment_preview(user, telegram_user_id, chat_id, amount_text, tod
         return _panel_result(
             panel_chat_id,
             panel_message_id,
-            f'{error}\nSend only the amount, for example: 37.50',
+            f'{error}\nSend only the amount, for example: 37.50 or 37,50',
             reply_markup=_repayment_amount_markup(obligation, get_obligation_balance(obligation, as_of=today)),
         )
 
@@ -464,7 +464,7 @@ def _repayment_preview_for_obligation(chat_id, obligation, amount_units, event_d
         return _panel_result(
             chat_id,
             message_id,
-            f'Repayment cannot exceed the balance on {event_date.isoformat()}.\n'
+            f'Repayment cannot exceed the balance on {_format_date(event_date)}.\n'
             f'Balance: {_format_money(balance_units)}',
             reply_markup=_obligation_detail_markup(obligation),
         )
@@ -475,7 +475,7 @@ def _repayment_preview_for_obligation(chat_id, obligation, amount_units, event_d
         'Confirm repayment',
         f'Obligation: {obligation.title}',
         f'Amount: {_format_money(amount_units)}',
-        f'Date: {event_date.isoformat()}',
+        f'Date: {_format_date(event_date)}',
     ])
     return _panel_result(
         chat_id,
@@ -542,7 +542,7 @@ def _custom_repayment_callback_response(user, telegram_user_id, data, chat_id, m
     return (
         '\n'.join([
             f'Custom repayment for {obligation.title}',
-            'Send only the amount, for example: 37.50',
+            'Send only the amount, for example: 37.50 or 37,50',
         ]),
         _obligation_detail_markup(obligation),
     )
@@ -591,7 +591,7 @@ def _new_obligation_callback_response(user, telegram_user_id, data, chat_id, mes
             return _new_obligation_schedule_text(context), _new_obligation_schedule_markup()
         if parts[2] == 'custom':
             context['step'] = 'opened_on'
-            return 'Send opened date as YYYY-MM-DD.', _new_obligation_cancel_markup()
+            return 'Send opened date as MM/DD/YYYY.', _new_obligation_cancel_markup()
         return 'Choose a date option.', _new_obligation_date_markup()
 
     if action == 'schedule' and len(parts) == 3:
@@ -614,7 +614,7 @@ def _new_obligation_callback_response(user, telegram_user_id, data, chat_id, mes
         if parts[2] == 'yes':
             context['has_interest'] = True
             context['step'] = 'interest_rate'
-            return 'Send annual interest rate, for example: 3.5', _new_obligation_cancel_markup()
+            return 'Send annual interest rate, for example: 3.5 or 3,5', _new_obligation_cancel_markup()
         return 'Choose an interest option.', _new_obligation_interest_markup()
 
     if action == 'create':
@@ -662,10 +662,10 @@ def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, tod
         return _panel_result(panel_chat_id, panel_message_id, _new_obligation_date_text(), _new_obligation_date_markup())
 
     if step == 'opened_on':
-        try:
-            context['opened_on'] = date.fromisoformat(text.strip())
-        except ValueError:
-            return _panel_result(panel_chat_id, panel_message_id, 'Opened date must use YYYY-MM-DD.', _new_obligation_cancel_markup())
+        opened_on, error = _parse_user_date(text)
+        if error:
+            return _panel_result(panel_chat_id, panel_message_id, f'Opened date must use MM/DD/YYYY. Example: {_format_date(today)}', _new_obligation_cancel_markup())
+        context['opened_on'] = opened_on
         context['step'] = 'schedule'
         return _panel_result(panel_chat_id, panel_message_id, _new_obligation_schedule_text(context), _new_obligation_schedule_markup())
 
@@ -685,8 +685,8 @@ def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, tod
 
     if step == 'interest_rate':
         try:
-            annual_rate_percent = Decimal(text.strip())
-        except InvalidOperation:
+            annual_rate_percent = Decimal(_normalize_decimal_text(text))
+        except (InvalidOperation, ValueError):
             return _panel_result(panel_chat_id, panel_message_id, 'Interest rate must be a number, for example: 3.5', _new_obligation_cancel_markup())
         if annual_rate_percent <= 0:
             return _panel_result(panel_chat_id, panel_message_id, 'Interest rate must be greater than zero.', _new_obligation_cancel_markup())
@@ -881,7 +881,7 @@ def _repayment_recorded_text(obligation, amount_units, event_date, already_recor
         heading,
         f'Obligation: {obligation.title}',
         f'Amount: {_format_money(amount_units)}',
-        f'Date: {event_date.isoformat()}',
+        f'Date: {_format_date(event_date)}',
         f'Current balance: {_format_money(balance_units)}',
     ])
 
@@ -902,10 +902,9 @@ def _parse_repayment_args(args_text, today):
 
     event_date = today
     if len(tokens) >= 3:
-        try:
-            event_date = date.fromisoformat(tokens[2])
-        except ValueError:
-            return {'error': 'Repayment date must use YYYY-MM-DD.'}
+        event_date, error = _parse_user_date(tokens[2])
+        if error:
+            return {'error': 'Repayment date must use MM/DD/YYYY.'}
 
     if event_date > today:
         return {'error': 'Repayment date cannot be in the future.'}
@@ -957,6 +956,7 @@ def _get_obligation_from_callback(user, data, prefix):
 
 
 def _parse_amount_units(amount_text):
+    amount_text = _normalize_decimal_text(amount_text)
     try:
         amount_units = units_from_decimal(Decimal(amount_text))
     except (InvalidOperation, ValueError):
@@ -965,6 +965,23 @@ def _parse_amount_units(amount_text):
     if amount_units <= 0:
         return None, 'Repayment amount must be greater than zero.'
     return amount_units, ''
+
+
+def _normalize_decimal_text(value):
+    text = str(value).strip()
+    if text.count(',') == 1 and '.' not in text:
+        return text.replace(',', '.')
+    return text
+
+
+def _parse_user_date(value):
+    text = str(value).strip()
+    for date_format in ('%m/%d/%Y', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(text, date_format).date(), ''
+        except ValueError:
+            continue
+    return None, 'Date must use MM/DD/YYYY.'
 
 
 def _parse_day_of_month(value):
@@ -1152,7 +1169,7 @@ def _new_obligation_schedule_text(context):
         'New obligation',
         f'Title: {context.get("title", "")}',
         f'Amount: {_format_money(context.get("amount_units", 0))}',
-        f'Opened: {context["opened_on"].isoformat()}',
+        f'Opened: {_format_date(context["opened_on"])}',
         '',
         'Choose payment schedule.',
     ])
@@ -1220,7 +1237,7 @@ def _new_obligation_confirm_text(user, context):
         f'Role: {_role_label(context.get("role"))}',
         f'Counterparty: {counterparty_label}',
         f'Amount: {_format_money(context.get("amount_units", 0))}',
-        f'Opened: {context.get("opened_on").isoformat()}',
+        f'Opened: {_format_date(context.get("opened_on"))}',
         f'Schedule: {_new_obligation_schedule_label(context)}',
         f'Interest: {interest_label}',
     ])
@@ -1278,6 +1295,10 @@ def _format_money(amount_units):
 def _format_signed_money(amount_units):
     sign = '+' if amount_units >= 0 else '-'
     return f'{sign}{_format_money(abs(amount_units))}'
+
+
+def _format_date(value):
+    return value.strftime('%m/%d/%Y')
 
 
 def _role_label(role):
