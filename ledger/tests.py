@@ -678,6 +678,8 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'Repayment')
         self.assertContains(response, 'Obligation settings')
         self.assertContains(response, 'Recalculate balance &amp; interest')
+        self.assertContains(response, 'data-recalculate-form')
+        self.assertContains(response, 'Recalculating...')
         self.assertContains(response, 'data-stop-tracking-form')
         self.assertContains(response, 'name="stop_tracking_confirmation"')
         self.assertNotContains(response, 'Recalculate recurring events')

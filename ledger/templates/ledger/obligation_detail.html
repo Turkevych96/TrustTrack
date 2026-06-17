@@ -25,7 +25,7 @@
                     <span class="sr-only">Obligation settings</span>
                 </summary>
                 <div class="action-menu-panel">
-                    <form class="menu-form" method="post" action="{% url 'ledger:obligation_recalculate' obligation.id %}">
+                    <form class="menu-form" method="post" action="{% url 'ledger:obligation_recalculate' obligation.id %}" data-recalculate-form>
                         {% csrf_token %}
                         <button class="menu-item" type="submit">Recalculate balance &amp; interest</button>
                     </form>
@@ -130,6 +130,38 @@
 {% block extra_scripts %}
 <script>
     (() => {
+        const showPendingMessage = (text) => {
+            const page = document.querySelector('.page');
+            if (!page) return;
+
+            let messages = page.querySelector('.messages');
+            if (!messages) {
+                messages = document.createElement('div');
+                messages.className = 'messages';
+                messages.setAttribute('aria-live', 'polite');
+                page.prepend(messages);
+            }
+
+            const message = document.createElement('div');
+            message.className = 'message';
+            message.textContent = text;
+            messages.replaceChildren(message);
+            messages.scrollIntoView({ block: 'start' });
+        };
+
+        const recalculateForm = document.querySelector('[data-recalculate-form]');
+        if (recalculateForm) {
+            recalculateForm.addEventListener('submit', () => {
+                const button = recalculateForm.querySelector('button[type="submit"]');
+                if (button) {
+                    button.disabled = true;
+                    button.textContent = 'Recalculating...';
+                }
+                recalculateForm.closest('details')?.removeAttribute('open');
+                showPendingMessage('Recalculating...');
+            });
+        }
+
         const form = document.querySelector('[data-stop-tracking-form]');
         if (!form) return;
 

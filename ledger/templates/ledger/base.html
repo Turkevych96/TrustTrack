@@ -407,7 +407,7 @@
     </header>
     <main class="page {% block page_class %}{% endblock %}">
         {% if messages %}
-            <div class="messages">
+            <div class="messages" aria-live="polite">
                 {% for message in messages %}
                     <div class="message">{{ message }}</div>
                 {% endfor %}
