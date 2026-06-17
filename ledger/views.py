@@ -37,6 +37,7 @@ from ledger.models import (
 )
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import edit_manual_transfer, post_principal_advance, post_repayment
+from ledger.services.history import build_balance_history
 from ledger.services.interest import generate_due_interest, recalculate_interest_from
 from ledger.services.money import decimal_from_units
 from ledger.services.planner import build_portfolio_projection, simulate_monthly_payment
@@ -74,16 +75,22 @@ def user_label(user):
 
 @login_required
 def dashboard(request):
-    obligations = list(
+    all_obligations = list(
         related_obligations(request.user)
-        .filter(status=Obligation.Status.OPEN)
         .select_related('borrower', 'creditor')
     )
-    rows = [_obligation_row(obligation, request.user) for obligation in obligations]
+    open_obligations = [
+        obligation
+        for obligation in all_obligations
+        if obligation.status == Obligation.Status.OPEN
+    ]
+    balance_history = build_balance_history(all_obligations, request.user, months=12)
+    balance_history_payload = _balance_history_chart_payload(balance_history['points'])
+    rows = [_obligation_row(obligation, request.user) for obligation in open_obligations]
     i_owe = sum(row['balance_units'] for row in rows if row['role'] == 'borrower')
     owed_to_me = sum(row['balance_units'] for row in rows if row['role'] == 'creditor')
     recent_transactions = (
-        LedgerTransaction.objects.filter(obligation__in=obligations)
+        LedgerTransaction.objects.filter(obligation__in=open_obligations)
         .select_related('obligation', 'financial_event')
         .order_by('-transaction_date', '-created_at')[:10]
     )
@@ -96,6 +103,9 @@ def dashboard(request):
             'owed_to_me': owed_to_me,
             'net_balance': owed_to_me - i_owe,
             'recent_transactions': recent_transactions,
+            'balance_history': balance_history,
+            'balance_history_chart_payload': balance_history_payload,
+            'balance_history_latest_net_class': 'positive' if balance_history['latest_net_units'] >= 0 else 'negative',
         },
     )
 
@@ -808,4 +818,13 @@ def _planner_chart_payload(points):
     return {
         'labels': [point['label'] for point in points],
         'values': [round(point['net_units'] / 10000, 2) for point in points],
+    }
+
+
+def _balance_history_chart_payload(points):
+    return {
+        'labels': [point['label'] for point in points],
+        'values': [round(point['net_units'] / 10000, 2) for point in points],
+        'iOweValues': [round(point['i_owe_units'] / 10000, 2) for point in points],
+        'owedToMeValues': [round(point['owed_to_me_units'] / 10000, 2) for point in points],
     }

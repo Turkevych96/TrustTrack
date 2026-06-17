@@ -637,6 +637,36 @@ class ViewTests(LedgerTestCase):
         self.assertContains(staff_response, reverse('admin:index'))
         self.assertContains(staff_response, 'Admin')
 
+    def test_dashboard_shows_actual_month_end_balance_history(self):
+        post_principal_advance(
+            self.obligation,
+            amount_units=1_000_000,
+            event_date=date(2026, 1, 1),
+        )
+        post_repayment(
+            self.obligation,
+            amount_units=250_000,
+            event_date=date(2026, 2, 10),
+        )
+        self.client.force_login(self.borrower_user)
+
+        with patch('ledger.services.history.timezone.localdate', return_value=date(2026, 6, 17)):
+            response = self.client.get(reverse('ledger:dashboard'))
+
+        payload = response.context['balance_history_chart_payload']
+        self.assertContains(response, 'Balance history')
+        self.assertContains(response, 'balance-history-chart-data')
+        self.assertEqual(payload['labels'][0], 'Jun 2025')
+        self.assertEqual(payload['labels'][-1], 'May 2026')
+        january_index = payload['labels'].index('Jan 2026')
+        february_index = payload['labels'].index('Feb 2026')
+        self.assertEqual(payload['iOweValues'][january_index], 100.0)
+        self.assertEqual(payload['values'][january_index], -100.0)
+        self.assertEqual(payload['iOweValues'][february_index], 75.0)
+        self.assertEqual(payload['values'][february_index], -75.0)
+        self.assertEqual(response.context['balance_history']['latest_net_units'], -750_000)
+        self.assertEqual(response.context['balance_history_latest_net_class'], 'negative')
+
     def test_profile_page_shows_collapsed_setting_sections(self):
         self.client.force_login(self.borrower_user)
 
