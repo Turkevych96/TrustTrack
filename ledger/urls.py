@@ -16,6 +16,7 @@ urlpatterns = [
     path('obligations/<int:pk>/history/', views.obligation_history, name='obligation_history'),
     path('obligations/<int:pk>/history/accounting/', views.obligation_accounting_history, name='obligation_accounting_history'),
     path('obligations/<int:pk>/repay/', views.repayment_create, name='repayment_create'),
+    path('obligations/<int:pk>/manual-transfers/<int:event_pk>/edit/', views.manual_transfer_update, name='manual_transfer_update'),
     path('obligations/<int:pk>/charges/new/', views.recurring_charge_create, name='recurring_charge_create'),
     path('obligations/<int:pk>/charges/<int:series_pk>/edit/', views.recurring_series_update, name='recurring_series_update'),
     path('obligations/<int:pk>/charges/generate-due/', views.recurring_due_generate, name='recurring_due_generate'),

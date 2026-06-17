@@ -274,6 +274,22 @@ class RepaymentForm(MoneyForm):
     memo = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
 
 
+class ManualTransferForm(MoneyForm):
+    TRANSFER_TYPE_CHOICES = (
+        (FinancialEvent.EventType.PRINCIPAL_ADVANCE, 'Debt increase'),
+        (FinancialEvent.EventType.REPAYMENT, 'Repayment'),
+    )
+
+    transfer_type = forms.ChoiceField(choices=TRANSFER_TYPE_CHOICES)
+    event_date = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}))
+    category = forms.CharField(max_length=80, required=False)
+    memo = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.order_fields(['transfer_type', 'event_date', 'amount', 'category', 'memo'])
+
+
 class PlannerHorizonForm(forms.Form):
     MONTH_CHOICES = (
         (12, '12 months'),

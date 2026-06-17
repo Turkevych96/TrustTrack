@@ -21,7 +21,7 @@ from ledger.models import (
     UserProfile,
 )
 from ledger.services.balances import get_obligation_balance
-from ledger.services.events import ensure_obligation_accounts, post_principal_advance, post_repayment
+from ledger.services.events import ensure_obligation_accounts, post_principal_advance, post_repayment, post_scheduled_charge
 from ledger.services.interest import (
     calculate_monthly_interest,
     generate_due_interest,
@@ -833,6 +833,175 @@ class ViewTests(LedgerTestCase):
         self.assertNotContains(response, 'Recalculate recurring events')
         self.assertNotContains(response, 'Generate due recurring events')
         self.assertNotContains(response, 'Generate due interest')
+
+    def test_obligation_detail_shows_manual_transfers_separately(self):
+        advance = post_principal_advance(
+            self.obligation,
+            amount_units=1_000_000,
+            event_date=date(2026, 1, 1),
+            memo='Initial transfer',
+            category='Home',
+        ).financial_event
+        post_repayment(
+            self.obligation,
+            amount_units=250_000,
+            event_date=date(2026, 1, 5),
+            memo='Partial repayment',
+        )
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Rent',
+            day_of_month=1,
+            starts_on=date(2026, 2, 1),
+        )
+        version = EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=100_000,
+            valid_from=date(2026, 2, 1),
+        )
+        post_scheduled_charge(
+            self.obligation,
+            amount_units=100_000,
+            event_date=date(2026, 2, 1),
+            event_series=series,
+            event_series_version=version,
+        )
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+
+        self.assertContains(response, 'Manual transfers')
+        self.assertEqual(len(response.context['manual_transfer_rows']), 2)
+        self.assertContains(response, 'Initial transfer')
+        self.assertContains(response, 'Partial repayment')
+        self.assertContains(response, 'You borrowed')
+        self.assertContains(response, 'You paid')
+        self.assertContains(
+            response,
+            reverse('ledger:manual_transfer_update', kwargs={'pk': self.obligation.pk, 'event_pk': advance.pk}),
+        )
+
+    def test_manual_transfer_edit_reverses_original_and_posts_replacement(self):
+        original = post_principal_advance(
+            self.obligation,
+            amount_units=1_000_000,
+            event_date=date(2026, 1, 1),
+            memo='Old transfer',
+            category='Old',
+        ).financial_event
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.post(
+            reverse('ledger:manual_transfer_update', kwargs={'pk': self.obligation.pk, 'event_pk': original.pk}),
+            {
+                'transfer_type': FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+                'event_date': '2026-01-03',
+                'amount': '150.00',
+                'category': 'New',
+                'memo': 'New transfer',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        original.refresh_from_db()
+        self.assertIsNotNone(original.voided_at)
+        replacement = FinancialEvent.objects.get(
+            obligation=self.obligation,
+            source=FinancialEvent.Source.MANUAL,
+            voided_at__isnull=True,
+            memo='New transfer',
+        )
+        self.assertEqual(replacement.event_type, FinancialEvent.EventType.PRINCIPAL_ADVANCE)
+        self.assertEqual(replacement.event_date, date(2026, 1, 3))
+        self.assertEqual(replacement.amount_units, 1_500_000)
+        self.assertEqual(replacement.category, 'New')
+        reversal = FinancialEvent.objects.get(
+            obligation=self.obligation,
+            event_type=FinancialEvent.EventType.ADJUSTMENT,
+            category='manual_transfer_reversal',
+        )
+        self.assertEqual(reversal.amount_units, 1_000_000)
+        self.assertEqual(reversal.direction, FinancialEvent.Direction.DECREASES_DEBT)
+        self.assertEqual(get_obligation_balance(self.obligation), 1_500_000)
+
+    def test_manual_transfer_edit_rolls_back_when_replacement_is_invalid(self):
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        original = post_repayment(
+            self.obligation,
+            amount_units=200_000,
+            event_date=date(2026, 1, 5),
+            memo='Small repayment',
+        ).financial_event
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.post(
+            reverse('ledger:manual_transfer_update', kwargs={'pk': self.obligation.pk, 'event_pk': original.pk}),
+            {
+                'transfer_type': FinancialEvent.EventType.REPAYMENT,
+                'event_date': '2026-01-05',
+                'amount': '125.00',
+                'category': '',
+                'memo': 'Too much',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Repayment cannot exceed')
+        original.refresh_from_db()
+        self.assertIsNone(original.voided_at)
+        self.assertFalse(
+            FinancialEvent.objects.filter(
+                obligation=self.obligation,
+                category='manual_transfer_reversal',
+            ).exists()
+        )
+        self.assertEqual(get_obligation_balance(self.obligation), 800_000)
+
+    def test_generated_transfer_cannot_use_manual_transfer_edit_url(self):
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Rent',
+            day_of_month=1,
+            starts_on=date(2026, 2, 1),
+        )
+        version = EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=100_000,
+            valid_from=date(2026, 2, 1),
+        )
+        generated_event = post_scheduled_charge(
+            self.obligation,
+            amount_units=100_000,
+            event_date=date(2026, 2, 1),
+            event_series=series,
+            event_series_version=version,
+        ).financial_event
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.get(
+            reverse('ledger:manual_transfer_update', kwargs={'pk': self.obligation.pk, 'event_pk': generated_event.pk})
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_closed_obligation_rejects_manual_transfer_edit_url(self):
+        transfer = post_principal_advance(
+            self.obligation,
+            amount_units=1_000_000,
+            event_date=date(2026, 1, 1),
+        ).financial_event
+        self.obligation.status = Obligation.Status.CLOSED
+        self.obligation.closed_on = date(2026, 1, 2)
+        self.obligation.save(update_fields=['status', 'closed_on', 'updated_at'])
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.get(
+            reverse('ledger:manual_transfer_update', kwargs={'pk': self.obligation.pk, 'event_pk': transfer.pk})
+        )
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        transfer.refresh_from_db()
+        self.assertIsNone(transfer.voided_at)
 
     def test_obligation_detail_limits_recent_activity(self):
         for index in range(12):

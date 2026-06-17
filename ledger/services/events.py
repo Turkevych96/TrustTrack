@@ -132,6 +132,115 @@ def post_repayment(obligation, amount_units, event_date, memo='', category='', i
     )
 
 
+def edit_manual_transfer(original_event, event_type, amount_units, event_date, memo='', category=''):
+    if original_event.source != FinancialEvent.Source.MANUAL:
+        raise ValidationError('Only manual transfers can be edited.')
+    if original_event.voided_at:
+        raise ValidationError('Voided manual transfers cannot be edited.')
+    if original_event.event_type not in (
+        FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+        FinancialEvent.EventType.REPAYMENT,
+    ):
+        raise ValidationError('Only manual advances and repayments can be edited.')
+    if event_type not in (
+        FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+        FinancialEvent.EventType.REPAYMENT,
+    ):
+        raise ValidationError('Unsupported manual transfer type.')
+
+    if (
+        original_event.event_type == event_type
+        and original_event.amount_units == amount_units
+        and original_event.event_date == event_date
+        and original_event.memo == memo
+        and original_event.category == category
+    ):
+        return {
+            'changed': False,
+            'original_event': original_event,
+            'reversal_transaction': None,
+            'replacement_transaction': original_event.ledger_transaction,
+        }
+
+    with db_transaction.atomic():
+        locked_event = FinancialEvent.objects.select_for_update().get(pk=original_event.pk)
+        if locked_event.voided_at:
+            raise ValidationError('Voided manual transfers cannot be edited.')
+
+        reversal_transaction = post_manual_transfer_reversal(locked_event)
+        if event_type == FinancialEvent.EventType.PRINCIPAL_ADVANCE:
+            replacement_transaction = post_principal_advance(
+                locked_event.obligation,
+                amount_units=amount_units,
+                event_date=event_date,
+                memo=memo,
+                category=category,
+                idempotency_key=f'manual-transfer-replacement:{locked_event.pk}',
+            )
+        else:
+            replacement_transaction = post_repayment(
+                locked_event.obligation,
+                amount_units=amount_units,
+                event_date=event_date,
+                memo=memo,
+                category=category,
+                idempotency_key=f'manual-transfer-replacement:{locked_event.pk}',
+            )
+
+        locked_event.voided_at = timezone.now()
+        locked_event.save(update_fields=['voided_at', 'updated_at'])
+        _audit(
+            'manual_transfer_edited',
+            locked_event.obligation,
+            replacement_transaction.financial_event,
+            {
+                'original_event_id': locked_event.pk,
+                'reversal_transaction_id': reversal_transaction.pk,
+                'replacement_transaction_id': replacement_transaction.pk,
+            },
+        )
+        return {
+            'changed': True,
+            'original_event': locked_event,
+            'reversal_transaction': reversal_transaction,
+            'replacement_transaction': replacement_transaction,
+        }
+
+
+def post_manual_transfer_reversal(original_event):
+    if original_event.source != FinancialEvent.Source.MANUAL:
+        raise ValidationError('Only manual transfers can be reversed.')
+    if original_event.event_type not in (
+        FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+        FinancialEvent.EventType.REPAYMENT,
+    ):
+        raise ValidationError('Only manual advances and repayments can be reversed.')
+
+    memo = f'Reverse manual {original_event.get_event_type_display()} from {original_event.event_date.isoformat()}'
+    idempotency_key = f'manual-transfer-reversal:{original_event.pk}'
+    if original_event.direction == FinancialEvent.Direction.INCREASES_DEBT:
+        return _post_debt_decrease(
+            obligation=original_event.obligation,
+            amount_units=original_event.amount_units,
+            event_date=original_event.event_date,
+            event_type=FinancialEvent.EventType.ADJUSTMENT,
+            source=FinancialEvent.Source.SYSTEM,
+            memo=memo,
+            category='manual_transfer_reversal',
+            idempotency_key=idempotency_key,
+        )
+    return _post_debt_increase(
+        obligation=original_event.obligation,
+        amount_units=original_event.amount_units,
+        event_date=original_event.event_date,
+        event_type=FinancialEvent.EventType.ADJUSTMENT,
+        source=FinancialEvent.Source.SYSTEM,
+        memo=memo,
+        category='manual_transfer_reversal',
+        idempotency_key=idempotency_key,
+    )
+
+
 def post_interest_reversal(obligation, amount_units, event_date, memo='', period_start=None, period_end=None, idempotency_key=None):
     return _post_debt_decrease(
         obligation=obligation,

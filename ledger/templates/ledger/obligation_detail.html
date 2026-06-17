@@ -55,6 +55,40 @@
     </div>
 </section>
 
+<section class="section-gap">
+    <h2>Manual transfers</h2>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Transfer</th>
+                    <th>Category</th>
+                    <th>Details</th>
+                    <th>Amount</th>
+                    {% if obligation.status == "open" %}<th></th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in manual_transfer_rows %}
+                    <tr>
+                        <td>{{ row.event.event_date }}</td>
+                        <td>{{ row.label }}</td>
+                        <td>{{ row.event.category|default:"-" }}</td>
+                        <td>{{ row.details|default:"-" }}</td>
+                        <td class="amount {{ row.amount_class }}">{{ row.signed_amount_units|signed_money_units }}</td>
+                        {% if obligation.status == "open" %}
+                            <td><a href="{% url 'ledger:manual_transfer_update' obligation.id row.event.id %}">Edit</a></td>
+                        {% endif %}
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="{% if obligation.status == "open" %}6{% else %}5{% endif %}" class="empty">No manual transfers yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
 <section class="grid settings-grid section-gap">
     <div>
         <h2>Recurring events</h2>

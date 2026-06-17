@@ -16,6 +16,7 @@ from ledger.forms import (
     CreateObligationForm,
     InterestRecalculateForm,
     InterestRatePeriodForm,
+    ManualTransferForm,
     PayoffSimulatorForm,
     PlannerHorizonForm,
     RecurringChargeForm,
@@ -35,8 +36,9 @@ from ledger.models import (
     UserProfile,
 )
 from ledger.services.balances import get_obligation_balance
-from ledger.services.events import post_principal_advance, post_repayment
+from ledger.services.events import edit_manual_transfer, post_principal_advance, post_repayment
 from ledger.services.interest import generate_due_interest, recalculate_interest_from
+from ledger.services.money import decimal_from_units
 from ledger.services.planner import build_portfolio_projection, simulate_monthly_payment
 from ledger.services.recalculation import recalculate_obligation
 from ledger.services.recurring import generate_due_recurring_events, recalculate_due_recurring_events
@@ -253,6 +255,7 @@ def obligation_list(request):
 def obligation_detail(request, pk):
     obligation = get_related_obligation(request.user, pk)
     financial_events_queryset = FinancialEvent.objects.filter(obligation=obligation).order_by('-event_date')
+    manual_transfers = _manual_transfer_events(obligation)
     event_series = (
         EventSeries.objects.filter(obligation=obligation)
         .prefetch_related('versions')
@@ -271,6 +274,7 @@ def obligation_detail(request, pk):
         'activity_preview': True,
         'activity_total': activity_total,
         'activity_has_more': activity_total > HISTORY_PREVIEW_LIMIT,
+        'manual_transfer_rows': [_manual_transfer_row(event, request.user) for event in manual_transfers],
         'event_series_rows': [_event_series_row(series) for series in event_series],
         'interest_rates': InterestRatePeriod.objects.filter(obligation=obligation).order_by('-effective_from'),
     }
@@ -391,6 +395,54 @@ def repayment_create(request, pk):
             'title': f'Record repayment: {obligation.title}',
             'form': form,
             'submit_label': 'Record repayment',
+            'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
+        },
+    )
+
+
+@login_required
+def manual_transfer_update(request, pk, event_pk):
+    obligation = get_related_obligation(request.user, pk)
+    if obligation.status != Obligation.Status.OPEN:
+        messages.error(request, 'Manual transfers can only be edited while the obligation is open.')
+        return redirect('ledger:obligation_detail', pk=obligation.pk)
+    transfer = get_object_or_404(_manual_transfer_events(obligation), pk=event_pk)
+    initial = {
+        'transfer_type': transfer.event_type,
+        'event_date': transfer.event_date,
+        'amount': decimal_from_units(transfer.amount_units),
+        'category': transfer.category,
+        'memo': transfer.memo,
+    }
+    if request.method == 'POST':
+        form = ManualTransferForm(request.POST)
+        if form.is_valid():
+            try:
+                result = edit_manual_transfer(
+                    transfer,
+                    event_type=form.cleaned_data['transfer_type'],
+                    amount_units=form.amount_units,
+                    event_date=form.cleaned_data['event_date'],
+                    category=form.cleaned_data.get('category', ''),
+                    memo=form.cleaned_data.get('memo', ''),
+                )
+                if result['changed']:
+                    messages.success(request, 'Manual transfer was updated.')
+                else:
+                    messages.success(request, 'Manual transfer was already current.')
+                return redirect('ledger:obligation_detail', pk=obligation.pk)
+            except ValidationError as error:
+                form.add_error(None, error)
+    else:
+        form = ManualTransferForm(initial=initial)
+
+    return render(
+        request,
+        'ledger/form.html',
+        {
+            'title': f'Edit manual transfer: {obligation.title}',
+            'form': form,
+            'submit_label': 'Save transfer',
             'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
         },
     )
@@ -649,6 +701,33 @@ def _event_series_row(series):
         'series': series,
         'current_amount_units': version.amount_units if version else None,
         'schedule_label': _event_series_schedule_label(series),
+    }
+
+
+def _manual_transfer_events(obligation):
+    return (
+        FinancialEvent.objects.filter(
+            obligation=obligation,
+            source=FinancialEvent.Source.MANUAL,
+            event_type__in=[
+                FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+                FinancialEvent.EventType.REPAYMENT,
+            ],
+            voided_at__isnull=True,
+        )
+        .select_related('obligation')
+        .order_by('-event_date', '-created_at')
+    )
+
+
+def _manual_transfer_row(event, user):
+    signed_amount_units = _signed_event_amount_units(event, user)
+    return {
+        'event': event,
+        'label': _activity_label(event, user),
+        'signed_amount_units': signed_amount_units,
+        'amount_class': 'positive' if signed_amount_units >= 0 else 'negative',
+        'details': _truncate_activity_details(event.memo),
     }
 
 
