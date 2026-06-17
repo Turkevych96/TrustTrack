@@ -1,5 +1,9 @@
-from django.contrib.auth.decorators import login_required
+from datetime import timedelta
+
 from django.contrib import messages
+from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import PasswordChangeForm
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
@@ -18,6 +22,7 @@ from ledger.forms import (
     RecurringRecalculateForm,
     RecurringSeriesUpdateForm,
     RepaymentForm,
+    UserProfileForm,
 )
 from ledger.models import (
     EventSeries,
@@ -27,6 +32,7 @@ from ledger.models import (
     LedgerEntry,
     LedgerTransaction,
     Obligation,
+    UserProfile,
 )
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import post_principal_advance, post_repayment
@@ -34,10 +40,22 @@ from ledger.services.interest import generate_due_interest, recalculate_interest
 from ledger.services.planner import build_portfolio_projection, simulate_monthly_payment
 from ledger.services.recalculation import recalculate_obligation
 from ledger.services.recurring import generate_due_recurring_events, recalculate_due_recurring_events
+from ledger.services.telegram import TelegramLookupError, get_telegram_chat_identity
 
 
 HISTORY_PREVIEW_LIMIT = 10
 STOP_TRACKING_CONFIRMATION = 'STOP'
+TELEGRAM_LOOKUP_TTL = timedelta(hours=24)
+TELEGRAM_IDENTITY_UPDATE_FIELDS = (
+    'telegram_chat_type',
+    'telegram_username',
+    'telegram_first_name',
+    'telegram_last_name',
+    'telegram_title',
+    'telegram_lookup_error',
+    'telegram_checked_at',
+    'updated_at',
+)
 
 
 def related_obligations(user):
@@ -78,6 +96,94 @@ def dashboard(request):
             'recent_transactions': recent_transactions,
         },
     )
+
+
+@login_required
+def profile(request):
+    profile_obj, _ = UserProfile.objects.get_or_create(user=request.user)
+    if _should_refresh_telegram_identity(profile_obj):
+        _refresh_telegram_identity(profile_obj)
+
+    profile_form = UserProfileForm(instance=profile_obj)
+    password_form = PasswordChangeForm(request.user)
+    show_telegram_form = not profile_obj.telegram_id
+    show_password_form = False
+
+    if request.method == 'POST':
+        if 'profile_submit' in request.POST:
+            show_telegram_form = True
+            profile_form = UserProfileForm(request.POST, instance=profile_obj)
+            if profile_form.is_valid():
+                profile_obj = profile_form.save()
+                _refresh_telegram_identity(profile_obj)
+                messages.success(request, 'Profile was updated.')
+                return redirect('ledger:profile')
+        elif 'password_submit' in request.POST:
+            show_password_form = True
+            password_form = PasswordChangeForm(request.user, request.POST)
+            if password_form.is_valid():
+                user = password_form.save()
+                update_session_auth_hash(request, user)
+                messages.success(request, 'Password was changed.')
+                return redirect('ledger:profile')
+
+    return render(
+        request,
+        'ledger/profile.html',
+        {
+            'profile_obj': profile_obj,
+            'profile_form': profile_form,
+            'password_form': password_form,
+            'show_telegram_form': show_telegram_form,
+            'show_password_form': show_password_form,
+        },
+    )
+
+
+def _should_refresh_telegram_identity(profile):
+    if not profile.telegram_id:
+        return False
+    if not profile.telegram_checked_at:
+        return True
+    if profile.telegram_lookup_error == 'Telegram bot token is not configured.':
+        return True
+    return profile.telegram_checked_at < timezone.now() - TELEGRAM_LOOKUP_TTL
+
+
+def _refresh_telegram_identity(profile):
+    if not profile.telegram_id:
+        _clear_telegram_identity(profile)
+        return
+
+    try:
+        identity = get_telegram_chat_identity(profile.telegram_id)
+    except TelegramLookupError as error:
+        profile.telegram_chat_type = ''
+        profile.telegram_username = ''
+        profile.telegram_first_name = ''
+        profile.telegram_last_name = ''
+        profile.telegram_title = ''
+        profile.telegram_lookup_error = str(error)
+    else:
+        profile.telegram_chat_type = identity.chat_type
+        profile.telegram_username = identity.username
+        profile.telegram_first_name = identity.first_name
+        profile.telegram_last_name = identity.last_name
+        profile.telegram_title = identity.title
+        profile.telegram_lookup_error = ''
+    profile.telegram_checked_at = timezone.now()
+    profile.save(update_fields=TELEGRAM_IDENTITY_UPDATE_FIELDS)
+
+
+def _clear_telegram_identity(profile):
+    profile.telegram_chat_type = ''
+    profile.telegram_username = ''
+    profile.telegram_first_name = ''
+    profile.telegram_last_name = ''
+    profile.telegram_title = ''
+    profile.telegram_lookup_error = ''
+    profile.telegram_checked_at = None
+    profile.save(update_fields=TELEGRAM_IDENTITY_UPDATE_FIELDS)
 
 
 @login_required

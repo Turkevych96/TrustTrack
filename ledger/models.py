@@ -30,6 +30,42 @@ class ObligationCategory(TimestampedModel):
         return self.name
 
 
+class UserProfile(TimestampedModel):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='trusttrack_profile',
+    )
+    telegram_id = models.BigIntegerField(
+        null=True,
+        blank=True,
+        unique=True,
+        validators=[MinValueValidator(1)],
+    )
+    telegram_chat_type = models.CharField(max_length=32, blank=True)
+    telegram_username = models.CharField(max_length=64, blank=True)
+    telegram_first_name = models.CharField(max_length=255, blank=True)
+    telegram_last_name = models.CharField(max_length=255, blank=True)
+    telegram_title = models.CharField(max_length=255, blank=True)
+    telegram_lookup_error = models.CharField(max_length=255, blank=True)
+    telegram_checked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['user__username']
+
+    def __str__(self):
+        return f'Profile for {self.user}'
+
+    @property
+    def telegram_display_name(self):
+        full_name = ' '.join(part for part in (self.telegram_first_name, self.telegram_last_name) if part)
+        if self.telegram_username and full_name:
+            return f'{full_name} (@{self.telegram_username})'
+        if self.telegram_username:
+            return f'@{self.telegram_username}'
+        return full_name or self.telegram_title
+
+
 class Obligation(TimestampedModel):
     class Status(models.TextChoices):
         OPEN = 'open', 'Open'

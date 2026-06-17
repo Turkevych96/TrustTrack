@@ -120,6 +120,42 @@
             border-radius: 8px;
             padding: 16px;
         }
+        .profile-page {
+            max-width: 820px;
+        }
+        .settings-stack {
+            display: grid;
+            gap: 16px;
+        }
+        .setting-panel {
+            display: grid;
+            gap: 14px;
+        }
+        .setting-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 14px;
+        }
+        .setting-head h2 {
+            margin-bottom: 4px;
+        }
+        .setting-summary {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+        .setting-value {
+            font-size: 18px;
+            font-weight: 700;
+            word-break: break-word;
+        }
+        .setting-note {
+            color: var(--warn);
+        }
+        .setting-edit[hidden] {
+            display: none;
+        }
         .section-gap {
             margin-top: 22px;
         }
@@ -374,6 +410,8 @@
             .nav, .page-title { flex-direction: column; align-items: stretch; }
             .nav-links, .nav-user { flex-wrap: wrap; }
             .metrics, .two-col, .settings-grid, .main-side, .simulator-grid { grid-template-columns: 1fr; }
+            .setting-head { align-items: stretch; flex-direction: column; }
+            .setting-summary { grid-template-columns: 1fr; }
             .action-menu-panel { left: 0; right: auto; }
             th, td { white-space: normal; }
         }
@@ -396,7 +434,7 @@
                     {% endif %}
                 </div>
                 <div class="nav-user">
-                    <span>{{ request.user|user_label }}</span>
+                    <a href="{% url 'ledger:profile' %}">{{ request.user|user_label }}</a>
                     <form method="post" action="{% url 'logout' %}">
                         {% csrf_token %}
                         <button class="link-button" type="submit">Log out</button>

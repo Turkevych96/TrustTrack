@@ -18,6 +18,7 @@ from ledger.models import (
     LedgerTransaction,
     Obligation,
     ObligationCategory,
+    UserProfile,
 )
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import ensure_obligation_accounts, post_principal_advance, post_repayment
@@ -33,6 +34,7 @@ from ledger.services.recurring import (
     generate_recurring_events_for_month,
     recalculate_due_recurring_events,
 )
+from ledger.services.telegram import TelegramChatIdentity
 from ledger.templatetags.money import money_units
 
 
@@ -621,6 +623,7 @@ class ViewTests(LedgerTestCase):
         response = self.client.get(reverse('ledger:dashboard'))
 
         self.assertContains(response, 'New obligation', count=1)
+        self.assertContains(response, reverse('ledger:profile'))
         self.assertContains(response, reverse('ledger:planner'))
         self.assertNotContains(response, reverse('admin:index'))
         self.assertNotContains(response, 'Admin')
@@ -633,6 +636,151 @@ class ViewTests(LedgerTestCase):
         self.assertContains(staff_response, 'New obligation', count=1)
         self.assertContains(staff_response, reverse('admin:index'))
         self.assertContains(staff_response, 'Admin')
+
+    def test_profile_page_shows_collapsed_setting_sections(self):
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('ledger:profile'))
+
+        content = response.content.decode()
+        self.assertLess(content.index('id="telegram-panel"'), content.index('id="password-panel"'))
+        self.assertContains(response, 'Telegram ID')
+        self.assertContains(response, 'Not connected')
+        self.assertContains(response, 'id="password-form" class="form-grid setting-edit" method="post" hidden')
+        self.assertContains(response, 'data-edit-target="password-form"')
+        self.assertContains(response, 'min="1"')
+
+    def test_profile_page_updates_telegram_id(self):
+        self.client.force_login(self.borrower_user)
+
+        with patch(
+            'ledger.views.get_telegram_chat_identity',
+            return_value=TelegramChatIdentity(
+                chat_id=123456789,
+                chat_type='private',
+                username='andrii_t',
+                first_name='Andrii',
+                last_name='Turkevych',
+            ),
+        ):
+            response = self.client.post(
+                reverse('ledger:profile'),
+                {
+                    'telegram_id': '123456789',
+                    'profile_submit': '1',
+                },
+            )
+
+        self.assertRedirects(response, reverse('ledger:profile'))
+        profile = UserProfile.objects.get(user=self.borrower_user)
+        self.assertEqual(profile.telegram_id, 123456789)
+        self.assertEqual(profile.telegram_chat_type, 'private')
+        self.assertEqual(profile.telegram_username, 'andrii_t')
+        self.assertEqual(profile.telegram_display_name, 'Andrii Turkevych (@andrii_t)')
+        self.assertIsNotNone(profile.telegram_checked_at)
+
+    def test_profile_page_refreshes_existing_telegram_identity(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=123456789)
+        self.client.force_login(self.borrower_user)
+
+        with patch(
+            'ledger.views.get_telegram_chat_identity',
+            return_value=TelegramChatIdentity(
+                chat_id=123456789,
+                chat_type='private',
+                username='family_user',
+                first_name='Family',
+            ),
+        ):
+            response = self.client.get(reverse('ledger:profile'))
+
+        self.assertContains(response, 'Family (@family_user)')
+        self.assertContains(response, 'private')
+
+    def test_profile_page_can_clear_telegram_id(self):
+        UserProfile.objects.create(
+            user=self.borrower_user,
+            telegram_id=123456789,
+            telegram_username='andrii_t',
+            telegram_chat_type='private',
+            telegram_lookup_error='old error',
+            telegram_checked_at=timezone.now(),
+        )
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.post(
+            reverse('ledger:profile'),
+            {
+                'telegram_id': '',
+                'profile_submit': '1',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:profile'))
+        profile = UserProfile.objects.get(user=self.borrower_user)
+        self.assertIsNone(profile.telegram_id)
+        self.assertEqual(profile.telegram_username, '')
+        self.assertEqual(profile.telegram_chat_type, '')
+        self.assertEqual(profile.telegram_lookup_error, '')
+        self.assertIsNone(profile.telegram_checked_at)
+
+    def test_profile_page_rejects_duplicate_telegram_id(self):
+        other_user = get_user_model().objects.create_user(username='maria')
+        UserProfile.objects.create(user=other_user, telegram_id=123456789)
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.post(
+            reverse('ledger:profile'),
+            {
+                'telegram_id': '123456789',
+                'profile_submit': '1',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'already exists')
+        self.assertContains(response, 'id="telegram-form" class="form-grid setting-edit" method="post"')
+        profile = UserProfile.objects.get(user=self.borrower_user)
+        self.assertIsNone(profile.telegram_id)
+
+    def test_profile_page_changes_password_and_keeps_user_logged_in(self):
+        self.borrower_user.set_password('old-family-pass-2026')
+        self.borrower_user.save(update_fields=['password'])
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.post(
+            reverse('ledger:profile'),
+            {
+                'old_password': 'old-family-pass-2026',
+                'new_password1': 'S0lid-family-pass-2026',
+                'new_password2': 'S0lid-family-pass-2026',
+                'password_submit': '1',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:profile'))
+        self.borrower_user.refresh_from_db()
+        self.assertTrue(self.borrower_user.check_password('S0lid-family-pass-2026'))
+        self.assertEqual(self.client.get(reverse('ledger:profile')).status_code, 200)
+
+    def test_profile_page_keeps_password_form_open_after_password_error(self):
+        self.borrower_user.set_password('old-family-pass-2026')
+        self.borrower_user.save(update_fields=['password'])
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.post(
+            reverse('ledger:profile'),
+            {
+                'old_password': 'wrong-password',
+                'new_password1': 'S0lid-family-pass-2026',
+                'new_password2': 'S0lid-family-pass-2026',
+                'password_submit': '1',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="password-form" class="form-grid setting-edit" method="post"')
+        self.assertNotContains(response, 'id="password-form" class="form-grid setting-edit" method="post" hidden')
 
     def test_planner_page_shows_active_obligations_and_projection(self):
         post_principal_advance(self.obligation, amount_units=3_000_000, event_date=date(2026, 1, 1))

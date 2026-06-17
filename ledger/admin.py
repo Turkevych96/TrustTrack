@@ -12,6 +12,7 @@ from .models import (
     LedgerTransaction,
     Obligation,
     ObligationCategory,
+    UserProfile,
 )
 
 
@@ -25,6 +26,18 @@ class ObligationCategoryAdmin(admin.ModelAdmin):
     list_display = ('name', 'active')
     list_filter = ('active',)
     search_fields = ('name',)
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ('user', 'telegram_id', 'telegram_username', 'telegram_checked_at')
+    search_fields = (
+        'user__username',
+        'user__first_name',
+        'user__last_name',
+        '=telegram_id',
+        'telegram_username',
+    )
 
 
 @admin.register(Obligation)

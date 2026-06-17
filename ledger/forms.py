@@ -6,7 +6,15 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from ledger.models import EventSeries, EventSeriesVersion, FinancialEvent, InterestRatePeriod, Obligation, ObligationCategory
+from ledger.models import (
+    EventSeries,
+    EventSeriesVersion,
+    FinancialEvent,
+    InterestRatePeriod,
+    Obligation,
+    ObligationCategory,
+    UserProfile,
+)
 from ledger.services.money import units_from_decimal
 
 
@@ -38,6 +46,23 @@ class MoneyForm(forms.Form):
 class UserChoiceField(forms.ModelChoiceField):
     def label_from_instance(self, user):
         return user.get_full_name() or user.get_username()
+
+
+class UserProfileForm(forms.ModelForm):
+    class Meta:
+        model = UserProfile
+        fields = ['telegram_id']
+        labels = {
+            'telegram_id': 'Telegram ID',
+        }
+        widgets = {
+            'telegram_id': forms.NumberInput(attrs={'min': '1'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['telegram_id'].min_value = 1
+        self.fields['telegram_id'].widget.attrs.update({'min': '1', 'step': '1'})
 
 
 class CreateObligationForm(MoneyForm):

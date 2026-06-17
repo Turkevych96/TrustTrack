@@ -1,0 +1,134 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}Profile - TrustTrack{% endblock %}
+{% block page_class %}profile-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Profile</h1>
+        <div class="muted">{{ request.user|user_label }}</div>
+    </div>
+</div>
+
+<div class="settings-stack">
+    <section class="panel setting-panel" id="telegram-panel">
+        <div class="setting-head">
+            <div>
+                <h2>Telegram</h2>
+                <div class="muted">{% if profile_obj.telegram_id %}Connected{% else %}Not connected{% endif %}</div>
+            </div>
+            {% if profile_obj.telegram_id %}
+                <button class="button secondary" type="button" data-edit-target="telegram-form" aria-controls="telegram-form">Change</button>
+            {% endif %}
+        </div>
+
+        {% if profile_obj.telegram_id %}
+            <div class="setting-summary">
+                <div>
+                    <div class="metric-label">Telegram ID</div>
+                    <div class="setting-value">{{ profile_obj.telegram_id }}</div>
+                </div>
+                <div>
+                    <div class="metric-label">Telegram user</div>
+                    {% if profile_obj.telegram_display_name %}
+                        <div class="setting-value">{{ profile_obj.telegram_display_name }}</div>
+                    {% else %}
+                        <div class="setting-value muted">Not verified</div>
+                    {% endif %}
+                </div>
+                {% if profile_obj.telegram_chat_type %}
+                    <div>
+                        <div class="metric-label">Chat type</div>
+                        <span class="badge">{{ profile_obj.telegram_chat_type }}</span>
+                    </div>
+                {% endif %}
+                {% if profile_obj.telegram_checked_at %}
+                    <div>
+                        <div class="metric-label">Last checked</div>
+                        <div>{{ profile_obj.telegram_checked_at|date:"M. j, Y H:i" }}</div>
+                    </div>
+                {% endif %}
+            </div>
+            {% if profile_obj.telegram_lookup_error %}
+                <div class="setting-note">{{ profile_obj.telegram_lookup_error }}</div>
+            {% endif %}
+        {% endif %}
+
+        <form id="telegram-form" class="form-grid setting-edit" method="post" {% if not show_telegram_form %}hidden{% endif %}>
+            {% csrf_token %}
+            {{ profile_form.non_field_errors }}
+            {% for field in profile_form %}
+                <div>
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="muted">{{ field.help_text }}</div>{% endif %}
+                    {{ field.errors }}
+                </div>
+            {% endfor %}
+            <div class="actions">
+                <button class="button" type="submit" name="profile_submit" value="1">Save Telegram</button>
+                {% if profile_obj.telegram_id %}
+                    <button class="button secondary" type="button" data-edit-cancel="telegram-form">Cancel</button>
+                {% endif %}
+            </div>
+        </form>
+    </section>
+
+    <section class="panel setting-panel" id="password-panel">
+        <div class="setting-head">
+            <div>
+                <h2>Password</h2>
+                <div class="muted">Set</div>
+            </div>
+            <button class="button secondary" type="button" data-edit-target="password-form" aria-controls="password-form">Change</button>
+        </div>
+
+        <form id="password-form" class="form-grid setting-edit" method="post" {% if not show_password_form %}hidden{% endif %}>
+            {% csrf_token %}
+            {{ password_form.non_field_errors }}
+            {% for field in password_form %}
+                <div>
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="muted">{{ field.help_text }}</div>{% endif %}
+                    {{ field.errors }}
+                </div>
+            {% endfor %}
+            <div class="actions">
+                <button class="button" type="submit" name="password_submit" value="1">Save password</button>
+                <button class="button secondary" type="button" data-edit-cancel="password-form">Cancel</button>
+            </div>
+        </form>
+    </section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    (() => {
+        const focusFirstField = (form) => {
+            const field = form.querySelector('input, select, textarea');
+            if (field) field.focus();
+        };
+
+        document.querySelectorAll('[data-edit-target]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const form = document.getElementById(button.dataset.editTarget);
+                if (!form) return;
+                form.hidden = false;
+                focusFirstField(form);
+            });
+        });
+
+        document.querySelectorAll('[data-edit-cancel]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const form = document.getElementById(button.dataset.editCancel);
+                if (!form) return;
+                form.hidden = true;
+            });
+        });
+    })();
+</script>
+{% endblock %}
