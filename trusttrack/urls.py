@@ -17,8 +17,12 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from ledger import views as ledger_views
+
 urlpatterns = [
     path('', include('ledger.urls')),
+    path('accounts/signup/', ledger_views.signup, name='signup'),
+    path('accounts/password-rules/', ledger_views.password_rule_status, name='password_rules'),
     path('accounts/', include('django.contrib.auth.urls')),
     path('admin/', admin.site.urls),
 ]

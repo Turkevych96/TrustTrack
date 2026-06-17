@@ -1,0 +1,121 @@
+{% extends "ledger/base.html" %}
+
+{% block title %}Create account - TrustTrack{% endblock %}
+{% block page_class %}form-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Create account</h1>
+        <div class="muted">Register a TrustTrack user without opening Django admin.</div>
+    </div>
+</div>
+
+<form class="panel form-grid" method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+        <div data-field-name="{{ field.name }}">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.name == "password1" %}
+                <ul class="password-rules" data-password-rules data-password-rules-url="{% url 'password_rules' %}">
+                    <li data-password-rule="personal">Your password can’t be too similar to your other personal information.</li>
+                    <li data-password-rule="length">Your password must contain at least 8 characters.</li>
+                    <li data-password-rule="common">Your password can’t be a commonly used password.</li>
+                    <li data-password-rule="numeric">Your password can’t be entirely numeric.</li>
+                </ul>
+            {% elif field.help_text %}
+                <div class="muted">{{ field.help_text }}</div>
+            {% endif %}
+            {{ field.errors }}
+        </div>
+    {% endfor %}
+    <div class="actions">
+        <button class="button" type="submit">Create account</button>
+        <a class="button secondary" href="{% url 'login' %}">Log in</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    (() => {
+        const rulesList = document.querySelector('[data-password-rules]');
+        const passwordInput = document.getElementById('id_password1');
+        const csrfInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        if (!rulesList || !passwordInput || !csrfInput) return;
+
+        const field = (id) => document.getElementById(id);
+        const personalInputs = [
+            field('id_username'),
+            field('id_first_name'),
+            field('id_last_name'),
+            field('id_email'),
+        ].filter(Boolean);
+        const ruleItems = Array.from(rulesList.querySelectorAll('[data-password-rule]'));
+        let validationController = null;
+        let debounceTimer = null;
+
+        const setRulesNeutral = () => {
+            rulesList.classList.remove('is-dirty');
+            ruleItems.forEach((item) => {
+                item.classList.remove('is-valid', 'is-invalid');
+            });
+        };
+
+        const setRuleStatus = (rules) => {
+            rulesList.classList.add('is-dirty');
+            ruleItems.forEach((item) => {
+                const isValid = Boolean(rules[item.dataset.passwordRule]);
+                item.classList.toggle('is-valid', isValid);
+                item.classList.toggle('is-invalid', !isValid);
+            });
+        };
+
+        const requestValidation = async () => {
+            if (validationController) validationController.abort();
+            if (!passwordInput.value) {
+                setRulesNeutral();
+                return;
+            }
+
+            const body = new FormData();
+            body.append('csrfmiddlewaretoken', csrfInput.value);
+            body.append('password', passwordInput.value);
+            personalInputs.forEach((input) => {
+                body.append(input.name, input.value);
+            });
+
+            validationController = new AbortController();
+            const activeController = validationController;
+            try {
+                const response = await fetch(rulesList.dataset.passwordRulesUrl, {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body,
+                    signal: activeController.signal,
+                });
+                if (!response.ok) return;
+                const payload = await response.json();
+                if (activeController === validationController) {
+                    setRuleStatus(payload.rules || {});
+                }
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    setRulesNeutral();
+                }
+            }
+        };
+
+        const scheduleValidation = () => {
+            window.clearTimeout(debounceTimer);
+            debounceTimer = window.setTimeout(requestValidation, 180);
+        };
+
+        passwordInput.addEventListener('input', scheduleValidation);
+        personalInputs.forEach((input) => input.addEventListener('input', scheduleValidation));
+        setRulesNeutral();
+    })();
+</script>
+{% endblock %}

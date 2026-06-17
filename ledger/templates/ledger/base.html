@@ -352,6 +352,36 @@
             margin: 6px 0 0;
             padding-left: 18px;
         }
+        .password-rules {
+            list-style: none;
+            margin: 8px 0 0;
+            padding: 0;
+            display: grid;
+            gap: 4px;
+            color: var(--muted);
+        }
+        .password-rules li {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        .password-rules li::before {
+            content: "\2022";
+            flex: 0 0 16px;
+            width: 16px;
+            text-align: center;
+            color: currentColor;
+        }
+        .password-rules.is-dirty li.is-valid {
+            color: var(--accent-dark);
+        }
+        .password-rules.is-dirty li.is-valid::before {
+            content: "\2713";
+            font-weight: 700;
+        }
+        .password-rules.is-dirty li.is-invalid {
+            color: var(--danger);
+        }
         .empty {
             color: var(--muted);
             padding: 18px;

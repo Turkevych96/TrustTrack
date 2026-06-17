@@ -1,12 +1,14 @@
 from datetime import timedelta
 
 from django.contrib import messages
-from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth import get_user_model, login, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
+from django.contrib.auth.password_validation import get_default_password_validators
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -24,6 +26,7 @@ from ledger.forms import (
     RecurringRecalculateForm,
     RecurringSeriesUpdateForm,
     RepaymentForm,
+    SignUpForm,
     UserProfileForm,
 )
 from ledger.models import (
@@ -60,6 +63,12 @@ TELEGRAM_IDENTITY_UPDATE_FIELDS = (
     'telegram_checked_at',
     'updated_at',
 )
+PASSWORD_RULE_CODES = {
+    'password_too_similar': 'personal',
+    'password_too_short': 'length',
+    'password_too_common': 'common',
+    'password_entirely_numeric': 'numeric',
+}
 
 
 def related_obligations(user):
@@ -72,6 +81,51 @@ def get_related_obligation(user, pk):
 
 def user_label(user):
     return user.get_full_name() or user.get_username()
+
+
+def signup(request):
+    if request.user.is_authenticated:
+        return redirect('ledger:dashboard')
+
+    if request.method == 'POST':
+        form = SignUpForm(request.POST)
+        if form.is_valid():
+            with transaction.atomic():
+                user = form.save()
+                UserProfile.objects.get_or_create(user=user)
+            login(request, user)
+            messages.success(request, 'Account created. Welcome to TrustTrack.')
+            return redirect('ledger:dashboard')
+    else:
+        form = SignUpForm()
+
+    return render(request, 'registration/signup.html', {'form': form})
+
+
+@require_POST
+def password_rule_status(request):
+    password = request.POST.get('password', '')
+    rules = {rule_name: False for rule_name in PASSWORD_RULE_CODES.values()}
+    if not password:
+        return JsonResponse({'rules': rules})
+
+    user_model = get_user_model()
+    user = user_model(
+        username=request.POST.get('username', ''),
+        first_name=request.POST.get('first_name', ''),
+        last_name=request.POST.get('last_name', ''),
+        email=request.POST.get('email', ''),
+    )
+    rules = {rule_name: True for rule_name in PASSWORD_RULE_CODES.values()}
+    for validator in get_default_password_validators():
+        try:
+            validator.validate(password, user)
+        except ValidationError as error:
+            for validation_error in error.error_list:
+                rule_name = PASSWORD_RULE_CODES.get(validation_error.code)
+                if rule_name:
+                    rules[rule_name] = False
+    return JsonResponse({'rules': rules})
 
 
 @login_required

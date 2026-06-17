@@ -1072,6 +1072,77 @@ class ViewTests(LedgerTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse('login'), response['Location'])
 
+    def test_login_page_links_to_signup(self):
+        response = self.client.get(reverse('login'))
+
+        self.assertContains(response, reverse('signup'))
+        self.assertContains(response, 'Create account')
+
+    def test_signup_creates_user_profile_and_logs_user_in(self):
+        response = self.client.post(
+            reverse('signup'),
+            {
+                'username': 'maria',
+                'first_name': 'Maria',
+                'last_name': 'Ivanova',
+                'email': 'maria@example.com',
+                'password1': 'TrustTrackPass2026!',
+                'password2': 'TrustTrackPass2026!',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:dashboard'))
+        user = get_user_model().objects.get(username='maria')
+        self.assertEqual(user.get_full_name(), 'Maria Ivanova')
+        self.assertEqual(user.email, 'maria@example.com')
+        self.assertTrue(UserProfile.objects.filter(user=user).exists())
+        self.assertEqual(int(self.client.session['_auth_user_id']), user.pk)
+
+    def test_signup_redirects_authenticated_users_to_dashboard(self):
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('signup'))
+
+        self.assertRedirects(response, reverse('ledger:dashboard'))
+
+    def test_password_rule_status_reports_valid_password(self):
+        response = self.client.post(
+            reverse('password_rules'),
+            {
+                'username': 'maria',
+                'first_name': 'Maria',
+                'last_name': 'Ivanova',
+                'email': 'maria@example.com',
+                'password': 'TrustTrackPass2026!',
+            },
+        )
+
+        self.assertEqual(
+            response.json()['rules'],
+            {
+                'personal': True,
+                'length': True,
+                'common': True,
+                'numeric': True,
+            },
+        )
+
+    def test_password_rule_status_reports_failed_rules(self):
+        common_response = self.client.post(reverse('password_rules'), {'password': 'password'})
+        similar_response = self.client.post(
+            reverse('password_rules'),
+            {
+                'username': 'maria',
+                'password': 'maria',
+            },
+        )
+        numeric_response = self.client.post(reverse('password_rules'), {'password': '12345678'})
+
+        self.assertFalse(common_response.json()['rules']['common'])
+        self.assertFalse(similar_response.json()['rules']['personal'])
+        self.assertFalse(similar_response.json()['rules']['length'])
+        self.assertFalse(numeric_response.json()['rules']['numeric'])
+
     def test_user_sees_only_related_obligations(self):
         user_model = get_user_model()
         other_creditor = user_model.objects.create_user(username='casey')

@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django import forms
 from django.contrib.auth import get_user_model
+from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
@@ -77,6 +78,12 @@ class ModulePreferencesForm(forms.ModelForm):
             'show_planner_module': 'Show Planner in the navigation bar.',
             'show_dashboard_balance_history': 'Show the Balance history chart on Dashboard.',
         }
+
+
+class SignUpForm(UserCreationForm):
+    class Meta(UserCreationForm.Meta):
+        model = get_user_model()
+        fields = ('username', 'first_name', 'last_name', 'email')
 
 
 class CreateObligationForm(MoneyForm):
