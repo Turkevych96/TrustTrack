@@ -42,6 +42,14 @@ Install dependencies:
 uv sync
 ```
 
+Create a local environment file:
+
+```bash
+copy .env.example .env
+```
+
+Keep `.env` local. It is ignored by Git and is the right place for values like `DJANGO_SECRET_KEY` and `TELEGRAM_BOT_TOKEN`.
+
 ## Database Setup
 
 The project uses a local SQLite database file named `db.sqlite3`.
