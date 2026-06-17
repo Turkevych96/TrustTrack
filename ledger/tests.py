@@ -637,6 +637,16 @@ class ViewTests(LedgerTestCase):
         self.assertContains(staff_response, reverse('admin:index'))
         self.assertContains(staff_response, 'Admin')
 
+    def test_nav_can_hide_planner_from_profile_preferences(self):
+        UserProfile.objects.create(user=self.borrower_user, show_planner_module=False)
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('ledger:dashboard'))
+
+        self.assertContains(response, reverse('ledger:dashboard'))
+        self.assertNotContains(response, reverse('ledger:planner'))
+        self.assertNotContains(response, 'Planner')
+
     def test_dashboard_shows_actual_month_end_balance_history(self):
         post_principal_advance(
             self.obligation,
@@ -667,6 +677,17 @@ class ViewTests(LedgerTestCase):
         self.assertEqual(response.context['balance_history']['latest_net_units'], -750_000)
         self.assertEqual(response.context['balance_history_latest_net_class'], 'negative')
 
+    def test_dashboard_can_hide_balance_history_from_profile_preferences(self):
+        UserProfile.objects.create(user=self.borrower_user, show_dashboard_balance_history=False)
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('ledger:dashboard'))
+
+        self.assertFalse(response.context['show_balance_history'])
+        self.assertNotContains(response, 'Balance history')
+        self.assertNotContains(response, 'balance-history-chart-data')
+        self.assertNotContains(response, 'chart.umd.min.js')
+
     def test_profile_page_shows_collapsed_setting_sections(self):
         self.client.force_login(self.borrower_user)
 
@@ -674,11 +695,30 @@ class ViewTests(LedgerTestCase):
 
         content = response.content.decode()
         self.assertLess(content.index('id="telegram-panel"'), content.index('id="password-panel"'))
+        self.assertLess(content.index('id="modules-panel"'), content.index('id="password-panel"'))
         self.assertContains(response, 'Telegram ID')
+        self.assertContains(response, 'Modules')
+        self.assertContains(response, 'Dashboard balance history')
         self.assertContains(response, 'Not connected')
         self.assertContains(response, 'id="password-form" class="form-grid setting-edit" method="post" hidden')
         self.assertContains(response, 'data-edit-target="password-form"')
         self.assertContains(response, 'min="1"')
+
+    def test_profile_page_updates_module_preferences(self):
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.post(
+            reverse('ledger:profile'),
+            {
+                'show_dashboard_balance_history': 'on',
+                'modules_submit': '1',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:profile'))
+        profile = UserProfile.objects.get(user=self.borrower_user)
+        self.assertFalse(profile.show_planner_module)
+        self.assertTrue(profile.show_dashboard_balance_history)
 
     def test_profile_page_updates_telegram_id(self):
         self.client.force_login(self.borrower_user)

@@ -1,6 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django import template
+from django.core.exceptions import ObjectDoesNotExist
 
 from ledger.services.money import decimal_from_units
 
@@ -30,3 +31,14 @@ def user_label(user):
     if user is None:
         return ''
     return user.get_full_name() or user.get_username()
+
+
+@register.filter
+def module_enabled(user, setting_name):
+    if user is None or not user.is_authenticated:
+        return False
+    try:
+        profile = user.trusttrack_profile
+    except ObjectDoesNotExist:
+        return True
+    return getattr(profile, setting_name, True)

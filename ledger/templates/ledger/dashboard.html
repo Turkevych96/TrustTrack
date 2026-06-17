@@ -27,25 +27,27 @@
     </div>
 </section>
 
-<section class="panel chart-panel">
-    <div class="chart-head">
-        <div>
-            <h2>Balance history</h2>
-            <div class="muted">Actual month-end net for the last 12 completed months.</div>
+{% if show_balance_history %}
+    <section class="panel chart-panel">
+        <div class="chart-head">
+            <div>
+                <h2>Balance history</h2>
+                <div class="muted">Actual month-end net for the last 12 completed months.</div>
+            </div>
+            <div class="net-chart-value">
+                Latest net
+                <strong class="{{ balance_history_latest_net_class }}">{{ balance_history.latest_net_units|signed_money_units }}</strong>
+                {% if balance_history.latest_date %}
+                    <span class="muted">as of {{ balance_history.latest_date }}</span>
+                {% endif %}
+            </div>
         </div>
-        <div class="net-chart-value">
-            Latest net
-            <strong class="{{ balance_history_latest_net_class }}">{{ balance_history.latest_net_units|signed_money_units }}</strong>
-            {% if balance_history.latest_date %}
-                <span class="muted">as of {{ balance_history.latest_date }}</span>
-            {% endif %}
+        <div class="chart-canvas-wrap">
+            <canvas id="balanceHistoryChart"></canvas>
         </div>
-    </div>
-    <div class="chart-canvas-wrap">
-        <canvas id="balanceHistoryChart"></canvas>
-    </div>
-    {{ balance_history_chart_payload|json_script:"balance-history-chart-data" }}
-</section>
+        {{ balance_history_chart_payload|json_script:"balance-history-chart-data" }}
+    </section>
+{% endif %}
 
 <section class="grid main-side section-gap">
     <div>
@@ -81,187 +83,189 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
-<script>
-(() => {
-    const dataElement = document.getElementById('balance-history-chart-data');
-    const canvas = document.getElementById('balanceHistoryChart');
-    if (!dataElement || !canvas) {
-        return;
-    }
-    const payload = JSON.parse(dataElement.textContent);
-    const style = getComputedStyle(document.documentElement);
-    const positive = style.getPropertyValue('--accent-dark').trim() || '#0f4d42';
-    const negative = style.getPropertyValue('--danger').trim() || '#b42318';
-    const lineColor = (value) => value < 0 ? negative : positive;
-    const formatSignedCurrency = (value, cents = true) => {
-        const amount = Math.abs(value).toLocaleString(undefined, {
-            style: 'currency',
-            currency: 'USD',
-            minimumFractionDigits: cents ? 2 : 0,
-            maximumFractionDigits: cents ? 2 : 0,
-        });
-        if (value === 0) {
-            return '$0';
-        }
-        return `${value > 0 ? '+' : '-'}${amount}`;
-    };
-    const formatCurrency = (value) => value.toLocaleString(undefined, {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
-    const drawFallbackChart = () => {
-        const context = canvas.getContext && canvas.getContext('2d');
-        if (!context || !payload.values.length) {
+{% if show_balance_history %}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+    <script>
+    (() => {
+        const dataElement = document.getElementById('balance-history-chart-data');
+        const canvas = document.getElementById('balanceHistoryChart');
+        if (!dataElement || !canvas) {
             return;
         }
-        const ratio = window.devicePixelRatio || 1;
-        const bounds = canvas.getBoundingClientRect();
-        const width = Math.max(Math.floor(bounds.width), 320);
-        const height = Math.max(Math.floor(bounds.height), 240);
-        canvas.width = width * ratio;
-        canvas.height = height * ratio;
-        context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        context.clearRect(0, 0, width, height);
-
-        const pad = { top: 18, right: 18, bottom: 34, left: 58 };
-        const plotWidth = width - pad.left - pad.right;
-        const plotHeight = height - pad.top - pad.bottom;
-        const values = payload.values;
-        let minValue = Math.min(0, ...values);
-        let maxValue = Math.max(0, ...values);
-        if (minValue === maxValue) {
-            minValue -= 1;
-            maxValue += 1;
-        }
-        const yFor = (value) => pad.top + ((maxValue - value) / (maxValue - minValue)) * plotHeight;
-        const xFor = (index) => pad.left + (values.length === 1 ? 0 : (index / (values.length - 1)) * plotWidth);
-
-        context.font = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-        context.textBaseline = 'middle';
-        context.strokeStyle = '#d8ded8';
-        context.fillStyle = '#68717d';
-        for (let index = 0; index <= 4; index += 1) {
-            const value = minValue + ((maxValue - minValue) * index / 4);
-            const y = yFor(value);
-            context.beginPath();
-            context.moveTo(pad.left, y);
-            context.lineTo(width - pad.right, y);
-            context.stroke();
-            context.fillText(formatSignedCurrency(value, false), 8, y);
-        }
-
-        const zeroY = yFor(0);
-        context.strokeStyle = '#9aa6af';
-        context.lineWidth = 2;
-        context.beginPath();
-        context.moveTo(pad.left, zeroY);
-        context.lineTo(width - pad.right, zeroY);
-        context.stroke();
-
-        context.lineWidth = 3;
-        for (let index = 1; index < values.length; index += 1) {
-            context.strokeStyle = lineColor(Math.min(values[index - 1], values[index]));
-            context.beginPath();
-            context.moveTo(xFor(index - 1), yFor(values[index - 1]));
-            context.lineTo(xFor(index), yFor(values[index]));
-            context.stroke();
-        }
-        values.forEach((value, index) => {
-            context.fillStyle = lineColor(value);
-            context.beginPath();
-            context.arc(xFor(index), yFor(value), 4, 0, Math.PI * 2);
-            context.fill();
+        const payload = JSON.parse(dataElement.textContent);
+        const style = getComputedStyle(document.documentElement);
+        const positive = style.getPropertyValue('--accent-dark').trim() || '#0f4d42';
+        const negative = style.getPropertyValue('--danger').trim() || '#b42318';
+        const lineColor = (value) => value < 0 ? negative : positive;
+        const formatSignedCurrency = (value, cents = true) => {
+            const amount = Math.abs(value).toLocaleString(undefined, {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: cents ? 2 : 0,
+                maximumFractionDigits: cents ? 2 : 0,
+            });
+            if (value === 0) {
+                return '$0';
+            }
+            return `${value > 0 ? '+' : '-'}${amount}`;
+        };
+        const formatCurrency = (value) => value.toLocaleString(undefined, {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
         });
+        const drawFallbackChart = () => {
+            const context = canvas.getContext && canvas.getContext('2d');
+            if (!context || !payload.values.length) {
+                return;
+            }
+            const ratio = window.devicePixelRatio || 1;
+            const bounds = canvas.getBoundingClientRect();
+            const width = Math.max(Math.floor(bounds.width), 320);
+            const height = Math.max(Math.floor(bounds.height), 240);
+            canvas.width = width * ratio;
+            canvas.height = height * ratio;
+            context.setTransform(ratio, 0, 0, ratio, 0, 0);
+            context.clearRect(0, 0, width, height);
 
-        context.fillStyle = '#68717d';
-        context.textAlign = 'center';
-        const labelIndexes = [0, Math.floor(values.length / 2), values.length - 1];
-        labelIndexes.forEach((index) => {
-            context.fillText(payload.labels[index], xFor(index), height - 14);
-        });
-        canvas.dataset.rendered = 'fallback';
-    };
+            const pad = { top: 18, right: 18, bottom: 34, left: 58 };
+            const plotWidth = width - pad.left - pad.right;
+            const plotHeight = height - pad.top - pad.bottom;
+            const values = payload.values;
+            let minValue = Math.min(0, ...values);
+            let maxValue = Math.max(0, ...values);
+            if (minValue === maxValue) {
+                minValue -= 1;
+                maxValue += 1;
+            }
+            const yFor = (value) => pad.top + ((maxValue - value) / (maxValue - minValue)) * plotHeight;
+            const xFor = (index) => pad.left + (values.length === 1 ? 0 : (index / (values.length - 1)) * plotWidth);
 
-    if (!window.Chart) {
-        drawFallbackChart();
-        return;
-    }
+            context.font = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+            context.textBaseline = 'middle';
+            context.strokeStyle = '#d8ded8';
+            context.fillStyle = '#68717d';
+            for (let index = 0; index <= 4; index += 1) {
+                const value = minValue + ((maxValue - minValue) * index / 4);
+                const y = yFor(value);
+                context.beginPath();
+                context.moveTo(pad.left, y);
+                context.lineTo(width - pad.right, y);
+                context.stroke();
+                context.fillText(formatSignedCurrency(value, false), 8, y);
+            }
 
-    new Chart(canvas, {
-        type: 'line',
-        data: {
-            labels: payload.labels,
-            datasets: [{
-                label: 'Net',
-                data: payload.values,
-                borderColor: (context) => lineColor(context.raw || 0),
-                backgroundColor: 'rgba(15, 77, 66, 0.08)',
-                fill: {
-                    target: 'origin',
-                    above: 'rgba(23, 107, 91, 0.12)',
-                    below: 'rgba(180, 35, 24, 0.12)',
-                },
-                borderWidth: 3,
-                pointRadius: 4,
-                pointHoverRadius: 6,
-                pointBackgroundColor: (context) => lineColor(context.raw || 0),
-                pointBorderWidth: 0,
-                tension: 0.28,
-                segment: {
-                    borderColor: (context) => lineColor(Math.min(context.p0.parsed.y, context.p1.parsed.y)),
-                },
-            }],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                intersect: false,
-                mode: 'index',
-            },
-            plugins: {
-                legend: {
-                    display: false,
-                },
-                tooltip: {
-                    callbacks: {
-                        label: (context) => [
-                            `Net ${formatSignedCurrency(context.parsed.y)}`,
-                            `I owe ${formatCurrency(payload.iOweValues[context.dataIndex] || 0)}`,
-                            `Owed to me ${formatCurrency(payload.owedToMeValues[context.dataIndex] || 0)}`,
-                        ],
+            const zeroY = yFor(0);
+            context.strokeStyle = '#9aa6af';
+            context.lineWidth = 2;
+            context.beginPath();
+            context.moveTo(pad.left, zeroY);
+            context.lineTo(width - pad.right, zeroY);
+            context.stroke();
+
+            context.lineWidth = 3;
+            for (let index = 1; index < values.length; index += 1) {
+                context.strokeStyle = lineColor(Math.min(values[index - 1], values[index]));
+                context.beginPath();
+                context.moveTo(xFor(index - 1), yFor(values[index - 1]));
+                context.lineTo(xFor(index), yFor(values[index]));
+                context.stroke();
+            }
+            values.forEach((value, index) => {
+                context.fillStyle = lineColor(value);
+                context.beginPath();
+                context.arc(xFor(index), yFor(value), 4, 0, Math.PI * 2);
+                context.fill();
+            });
+
+            context.fillStyle = '#68717d';
+            context.textAlign = 'center';
+            const labelIndexes = [0, Math.floor(values.length / 2), values.length - 1];
+            labelIndexes.forEach((index) => {
+                context.fillText(payload.labels[index], xFor(index), height - 14);
+            });
+            canvas.dataset.rendered = 'fallback';
+        };
+
+        if (!window.Chart) {
+            drawFallbackChart();
+            return;
+        }
+
+        new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: payload.labels,
+                datasets: [{
+                    label: 'Net',
+                    data: payload.values,
+                    borderColor: (context) => lineColor(context.raw || 0),
+                    backgroundColor: 'rgba(15, 77, 66, 0.08)',
+                    fill: {
+                        target: 'origin',
+                        above: 'rgba(23, 107, 91, 0.12)',
+                        below: 'rgba(180, 35, 24, 0.12)',
                     },
-                },
+                    borderWidth: 3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: (context) => lineColor(context.raw || 0),
+                    pointBorderWidth: 0,
+                    tension: 0.28,
+                    segment: {
+                        borderColor: (context) => lineColor(Math.min(context.p0.parsed.y, context.p1.parsed.y)),
+                    },
+                }],
             },
-            scales: {
-                x: {
-                    grid: {
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'index',
+                },
+                plugins: {
+                    legend: {
                         display: false,
                     },
-                    ticks: {
-                        color: '#68717d',
-                        maxRotation: 0,
-                        autoSkip: true,
-                        maxTicksLimit: 12,
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => [
+                                `Net ${formatSignedCurrency(context.parsed.y)}`,
+                                `I owe ${formatCurrency(payload.iOweValues[context.dataIndex] || 0)}`,
+                                `Owed to me ${formatCurrency(payload.owedToMeValues[context.dataIndex] || 0)}`,
+                            ],
+                        },
                     },
                 },
-                y: {
-                    grid: {
-                        color: (context) => context.tick.value === 0 ? '#9aa6af' : '#d8ded8',
-                        lineWidth: (context) => context.tick.value === 0 ? 2 : 1,
+                scales: {
+                    x: {
+                        grid: {
+                            display: false,
+                        },
+                        ticks: {
+                            color: '#68717d',
+                            maxRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: 12,
+                        },
                     },
-                    ticks: {
-                        color: '#68717d',
-                        callback: (value) => formatSignedCurrency(value, false),
+                    y: {
+                        grid: {
+                            color: (context) => context.tick.value === 0 ? '#9aa6af' : '#d8ded8',
+                            lineWidth: (context) => context.tick.value === 0 ? 2 : 1,
+                        },
+                        ticks: {
+                            color: '#68717d',
+                            callback: (value) => formatSignedCurrency(value, false),
+                        },
                     },
                 },
             },
-        },
-    });
-    canvas.dataset.rendered = 'chartjs';
-})();
-</script>
+        });
+        canvas.dataset.rendered = 'chartjs';
+    })();
+    </script>
+{% endif %}
 {% endblock %}

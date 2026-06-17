@@ -49,6 +49,8 @@ class UserProfile(TimestampedModel):
     telegram_title = models.CharField(max_length=255, blank=True)
     telegram_lookup_error = models.CharField(max_length=255, blank=True)
     telegram_checked_at = models.DateTimeField(null=True, blank=True)
+    show_planner_module = models.BooleanField(default=True)
+    show_dashboard_balance_history = models.BooleanField(default=True)
 
     class Meta:
         ordering = ['user__username']

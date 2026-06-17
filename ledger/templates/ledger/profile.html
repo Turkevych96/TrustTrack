@@ -76,6 +76,33 @@
         </form>
     </section>
 
+    <section class="panel setting-panel" id="modules-panel">
+        <div class="setting-head">
+            <div>
+                <h2>Modules</h2>
+                <div class="muted">Personal navigation and dashboard visibility.</div>
+            </div>
+        </div>
+
+        <form class="form-grid" method="post">
+            {% csrf_token %}
+            {{ module_preferences_form.non_field_errors }}
+            {% for field in module_preferences_form %}
+                <div data-field-name="{{ field.name }}">
+                    <label>
+                        {{ field }}
+                        {{ field.label }}
+                    </label>
+                    {% if field.help_text %}<div class="muted">{{ field.help_text }}</div>{% endif %}
+                    {{ field.errors }}
+                </div>
+            {% endfor %}
+            <div class="actions">
+                <button class="button" type="submit" name="modules_submit" value="1">Save modules</button>
+            </div>
+        </form>
+    </section>
+
     <section class="panel setting-panel" id="password-panel">
         <div class="setting-head">
             <div>

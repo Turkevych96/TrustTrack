@@ -17,6 +17,7 @@ from ledger.forms import (
     InterestRecalculateForm,
     InterestRatePeriodForm,
     ManualTransferForm,
+    ModulePreferencesForm,
     PayoffSimulatorForm,
     PlannerHorizonForm,
     RecurringChargeForm,
@@ -75,6 +76,7 @@ def user_label(user):
 
 @login_required
 def dashboard(request):
+    profile_obj, _ = UserProfile.objects.get_or_create(user=request.user)
     all_obligations = list(
         related_obligations(request.user)
         .select_related('borrower', 'creditor')
@@ -106,6 +108,7 @@ def dashboard(request):
             'balance_history': balance_history,
             'balance_history_chart_payload': balance_history_payload,
             'balance_history_latest_net_class': 'positive' if balance_history['latest_net_units'] >= 0 else 'negative',
+            'show_balance_history': profile_obj.show_dashboard_balance_history,
         },
     )
 
@@ -117,6 +120,7 @@ def profile(request):
         _refresh_telegram_identity(profile_obj)
 
     profile_form = UserProfileForm(instance=profile_obj)
+    module_preferences_form = ModulePreferencesForm(instance=profile_obj)
     password_form = PasswordChangeForm(request.user)
     show_telegram_form = not profile_obj.telegram_id
     show_password_form = False
@@ -129,6 +133,12 @@ def profile(request):
                 profile_obj = profile_form.save()
                 _refresh_telegram_identity(profile_obj)
                 messages.success(request, 'Profile was updated.')
+                return redirect('ledger:profile')
+        elif 'modules_submit' in request.POST:
+            module_preferences_form = ModulePreferencesForm(request.POST, instance=profile_obj)
+            if module_preferences_form.is_valid():
+                module_preferences_form.save()
+                messages.success(request, 'Module preferences were updated.')
                 return redirect('ledger:profile')
         elif 'password_submit' in request.POST:
             show_password_form = True
@@ -145,6 +155,7 @@ def profile(request):
         {
             'profile_obj': profile_obj,
             'profile_form': profile_form,
+            'module_preferences_form': module_preferences_form,
             'password_form': password_form,
             'show_telegram_form': show_telegram_form,
             'show_password_form': show_password_form,

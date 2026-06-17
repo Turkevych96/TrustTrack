@@ -65,6 +65,20 @@ class UserProfileForm(forms.ModelForm):
         self.fields['telegram_id'].widget.attrs.update({'min': '1', 'step': '1'})
 
 
+class ModulePreferencesForm(forms.ModelForm):
+    class Meta:
+        model = UserProfile
+        fields = ['show_planner_module', 'show_dashboard_balance_history']
+        labels = {
+            'show_planner_module': 'Planner',
+            'show_dashboard_balance_history': 'Dashboard balance history',
+        }
+        help_texts = {
+            'show_planner_module': 'Show Planner in the navigation bar.',
+            'show_dashboard_balance_history': 'Show the Balance history chart on Dashboard.',
+        }
+
+
 class CreateObligationForm(MoneyForm):
     ROLE_LENT = 'lent'
     ROLE_BORROWED = 'borrowed'

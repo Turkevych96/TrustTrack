@@ -427,7 +427,9 @@
             {% if request.user.is_authenticated %}
                 <div class="nav-links">
                     <a href="{% url 'ledger:dashboard' %}">Dashboard</a>
-                    <a href="{% url 'ledger:planner' %}">Planner</a>
+                    {% if request.user|module_enabled:"show_planner_module" %}
+                        <a href="{% url 'ledger:planner' %}">Planner</a>
+                    {% endif %}
                     <a href="{% url 'ledger:obligation_list' %}">Obligations</a>
                     {% if request.user.is_staff %}
                         <a href="{% url 'admin:index' %}">Admin</a>
