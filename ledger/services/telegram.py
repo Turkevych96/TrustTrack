@@ -57,6 +57,18 @@ def send_telegram_message(chat_id, text, reply_markup=None):
     return telegram_api_request('sendMessage', params).get('result')
 
 
+def edit_telegram_message(chat_id, message_id, text, reply_markup=None):
+    params = {
+        'chat_id': chat_id,
+        'message_id': message_id,
+        'text': text,
+        'disable_web_page_preview': True,
+    }
+    if reply_markup:
+        params['reply_markup'] = reply_markup
+    return telegram_api_request('editMessageText', params).get('result')
+
+
 def answer_telegram_callback_query(callback_query_id, text=''):
     params = {'callback_query_id': callback_query_id}
     if text:

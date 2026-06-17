@@ -173,7 +173,10 @@ class TelegramBotTests(LedgerTestCase):
         )
 
         self.assertEqual(len(result.messages), 1)
-        self.assertIn('TrustTrack access confirmed', result.messages[0].text)
+        self.assertIn('TrustTrack', result.messages[0].text)
+        self.assertIn('User: Andrii', result.messages[0].text)
+        self.assertIn('I owe: $100.00', result.messages[0].text)
+        self.assertIn('Net: -$100.00', result.messages[0].text)
         self.assertIn(self.obligation.title, result.messages[0].text)
         self.assertNotIn(f'O{self.obligation.pk}', result.messages[0].text)
         self.assertNotIn('/start -', result.messages[0].text)
@@ -185,6 +188,20 @@ class TelegramBotTests(LedgerTestCase):
                 [{'text': 'Open obligations', 'callback_data': 'menu:obligations'}],
             ],
         )
+
+    def test_home_button_edits_existing_panel(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+
+        result = process_telegram_update(
+            self._telegram_callback('menu:home', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+
+        self.assertTrue(result.messages[0].replace_existing)
+        self.assertEqual(result.messages[0].message_id, 99)
+        self.assertIn('TrustTrack', result.messages[0].text)
+        self.assertIn('I owe: $100.00', result.messages[0].text)
 
     def test_obligation_buttons_open_detail_and_repayment_amounts(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
@@ -207,9 +224,12 @@ class TelegramBotTests(LedgerTestCase):
             list_result.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
             f'ob:{self.obligation.pk}',
         )
+        self.assertTrue(list_result.messages[0].replace_existing)
+        self.assertEqual(list_result.messages[0].message_id, 99)
         self.assertIn(self.obligation.title, list_result.messages[0].text)
         self.assertNotIn(f'O{self.obligation.pk}', list_result.messages[0].text)
         self.assertIn('Current balance: $100.00', detail_result.messages[0].text)
+        self.assertTrue(detail_result.messages[0].replace_existing)
         self.assertIn(self.obligation.title, detail_result.messages[0].text)
         self.assertNotIn(f'O{self.obligation.pk}', detail_result.messages[0].text)
         self.assertEqual(
@@ -218,6 +238,7 @@ class TelegramBotTests(LedgerTestCase):
         )
         self.assertNotIn(f'O{self.obligation.pk}', repayment_menu_result.messages[0].text)
         repayment_buttons = repayment_menu_result.messages[0].reply_markup['inline_keyboard']
+        self.assertTrue(repayment_menu_result.messages[0].replace_existing)
         self.assertIn({'text': 'Pay $25.00', 'callback_data': f'repayamt:{self.obligation.pk}:250000'}, repayment_buttons[0])
         self.assertEqual(
             repayment_buttons[-2][0],
@@ -235,6 +256,8 @@ class TelegramBotTests(LedgerTestCase):
         )
 
         self.assertIn('Confirm repayment', result.messages[0].text)
+        self.assertTrue(result.messages[0].replace_existing)
+        self.assertEqual(result.messages[0].message_id, 99)
         self.assertNotIn(f'O{self.obligation.pk}', result.messages[0].text)
         self.assertEqual(
             result.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
@@ -256,8 +279,11 @@ class TelegramBotTests(LedgerTestCase):
         )
 
         self.assertIn('Send only the amount', custom_prompt.messages[0].text)
+        self.assertTrue(custom_prompt.messages[0].replace_existing)
         self.assertNotIn(f'O{self.obligation.pk}', custom_prompt.messages[0].text)
         self.assertIn('Confirm repayment', confirmation.messages[0].text)
+        self.assertTrue(confirmation.messages[0].replace_existing)
+        self.assertEqual(confirmation.messages[0].message_id, 99)
         self.assertIn('Amount: $37.50', confirmation.messages[0].text)
         self.assertNotIn(f'O{self.obligation.pk}', confirmation.messages[0].text)
         self.assertEqual(
@@ -298,8 +324,10 @@ class TelegramBotTests(LedgerTestCase):
 
         self.assertEqual(get_obligation_balance(self.obligation), 750_000)
         self.assertIn('Repayment recorded', first_result.messages[0].text)
+        self.assertTrue(first_result.messages[0].replace_existing)
         self.assertNotIn(f'O{self.obligation.pk}', first_result.messages[0].text)
         self.assertIn('already recorded', second_result.messages[0].text)
+        self.assertTrue(second_result.messages[0].replace_existing)
         self.assertNotIn(f'O{self.obligation.pk}', second_result.messages[0].text)
         self.assertEqual(LedgerTransaction.objects.filter(idempotency_key__startswith='telegram-repayment:').count(), 1)
 
@@ -329,7 +357,7 @@ class TelegramBotTests(LedgerTestCase):
             },
         }
 
-    def _telegram_callback(self, data, telegram_id=555, chat_id=None, chat_type='private'):
+    def _telegram_callback(self, data, telegram_id=555, chat_id=None, chat_type='private', message_id=99):
         return {
             'callback_query': {
                 'id': 'callback-1',
@@ -337,6 +365,7 @@ class TelegramBotTests(LedgerTestCase):
                     'id': telegram_id,
                 },
                 'message': {
+                    'message_id': message_id,
                     'chat': {
                         'id': telegram_id if chat_id is None else chat_id,
                         'type': chat_type,

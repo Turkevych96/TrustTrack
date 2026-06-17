@@ -3,6 +3,7 @@ from django.core.management.base import BaseCommand
 from ledger.services.telegram import (
     TelegramLookupError,
     answer_telegram_callback_query,
+    edit_telegram_message,
     get_telegram_updates,
     send_telegram_message,
 )
@@ -44,13 +45,22 @@ class Command(BaseCommand):
                     if result.callback_query_id:
                         answer_telegram_callback_query(result.callback_query_id, result.callback_text)
                     for message in result.messages:
-                        send_telegram_message(
-                            message.chat_id,
-                            message.text,
-                            reply_markup=message.reply_markup,
-                        )
+                        if message.replace_existing and message.message_id is not None:
+                            edit_telegram_message(
+                                message.chat_id,
+                                message.message_id,
+                                message.text,
+                                reply_markup=message.reply_markup,
+                            )
+                        else:
+                            send_telegram_message(
+                                message.chat_id,
+                                message.text,
+                                reply_markup=message.reply_markup,
+                            )
                 except TelegramLookupError as error:
-                    self.stderr.write(str(error))
+                    if 'message is not modified' not in str(error).lower():
+                        self.stderr.write(str(error))
 
             if options['once']:
                 return

@@ -23,6 +23,8 @@ class TelegramOutgoingMessage:
     chat_id: int
     text: str
     reply_markup: dict | None = None
+    message_id: int | None = None
+    replace_existing: bool = False
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,7 @@ def _process_callback_query(callback_query, today, nonce_factory):
     message = callback_query.get('message') or {}
     chat = message.get('chat') or {}
     chat_id = chat.get('id')
+    message_id = message.get('message_id')
     data = callback_query.get('data') or ''
 
     if not callback_query_id or not chat_id or not telegram_user_id:
@@ -121,7 +124,7 @@ def _process_callback_query(callback_query, today, nonce_factory):
     access_message = _access_error_message(chat, telegram_user_id)
     if access_message:
         return TelegramBotResult(
-            messages=[TelegramOutgoingMessage(chat_id, access_message)],
+            messages=[_panel_message(chat_id, message_id, access_message)],
             callback_query_id=callback_query_id,
             callback_text='Access denied',
         )
@@ -129,28 +132,35 @@ def _process_callback_query(callback_query, today, nonce_factory):
     profile = _get_profile_for_telegram_id(telegram_user_id)
     if not profile:
         return TelegramBotResult(
-            messages=[TelegramOutgoingMessage(chat_id, 'Access is not configured for this Telegram ID.')],
+            messages=[_panel_message(chat_id, message_id, 'Access is not configured for this Telegram ID.')],
             callback_query_id=callback_query_id,
             callback_text='Access denied',
         )
 
     if data == 'noop:cancel':
         return TelegramBotResult(
-            messages=[TelegramOutgoingMessage(chat_id, 'Cancelled.')],
+            messages=[_panel_message(chat_id, message_id, 'Cancelled.', _main_menu_markup(include_home=True))],
             callback_query_id=callback_query_id,
             callback_text='Cancelled',
         )
+    if data == 'menu:home':
+        return TelegramBotResult(
+            messages=[_panel_message(chat_id, message_id, _start_text(profile.user, today), _main_menu_markup())],
+            callback_query_id=callback_query_id,
+            callback_text='Home',
+        )
     if data == 'menu:balance':
         return TelegramBotResult(
-            messages=[TelegramOutgoingMessage(chat_id, _balance_text(profile.user), _main_menu_markup())],
+            messages=[_panel_message(chat_id, message_id, _balance_text(profile.user), _main_menu_markup(include_home=True))],
             callback_query_id=callback_query_id,
             callback_text='Balance',
         )
     if data == 'menu:obligations':
         return TelegramBotResult(
             messages=[
-                TelegramOutgoingMessage(
+                _panel_message(
                     chat_id,
+                    message_id,
                     _obligations_menu_text(profile.user, today),
                     _obligations_menu_markup(profile.user),
                 )
@@ -161,41 +171,47 @@ def _process_callback_query(callback_query, today, nonce_factory):
     if data.startswith('ob:'):
         text, reply_markup = _obligation_callback_response(profile.user, data)
         return TelegramBotResult(
-            messages=[TelegramOutgoingMessage(chat_id, text, reply_markup)],
+            messages=[_panel_message(chat_id, message_id, text, reply_markup)],
             callback_query_id=callback_query_id,
             callback_text='Obligation',
         )
     if data.startswith('repaymenu:'):
         text, reply_markup = _repayment_menu_callback_response(profile.user, data, today)
         return TelegramBotResult(
-            messages=[TelegramOutgoingMessage(chat_id, text, reply_markup)],
+            messages=[_panel_message(chat_id, message_id, text, reply_markup)],
             callback_query_id=callback_query_id,
             callback_text='Repayment',
         )
     if data.startswith('customrepay:'):
-        text, reply_markup = _custom_repayment_callback_response(profile.user, telegram_user_id, data)
+        text, reply_markup = _custom_repayment_callback_response(
+            profile.user,
+            telegram_user_id,
+            data,
+            chat_id,
+            message_id,
+        )
         return TelegramBotResult(
-            messages=[TelegramOutgoingMessage(chat_id, text, reply_markup)],
+            messages=[_panel_message(chat_id, message_id, text, reply_markup)],
             callback_query_id=callback_query_id,
             callback_text='Custom amount',
         )
     if data.startswith('repayamt:'):
         text, reply_markup = _repayment_amount_callback_response(profile.user, data, today, nonce_factory)
         return TelegramBotResult(
-            messages=[TelegramOutgoingMessage(chat_id, text, reply_markup)],
+            messages=[_panel_message(chat_id, message_id, text, reply_markup)],
             callback_query_id=callback_query_id,
             callback_text='Confirm repayment',
         )
     if data.startswith('repay:'):
         text = _confirm_repayment(profile.user, data, today)
         return TelegramBotResult(
-            messages=[TelegramOutgoingMessage(chat_id, text, _main_menu_markup())],
+            messages=[_panel_message(chat_id, message_id, text, _main_menu_markup(include_home=True))],
             callback_query_id=callback_query_id,
             callback_text='Processed',
         )
 
     return TelegramBotResult(
-        messages=[TelegramOutgoingMessage(chat_id, 'This button is no longer supported.')],
+        messages=[_panel_message(chat_id, message_id, 'This button is no longer supported.', _main_menu_markup(include_home=True))],
         callback_query_id=callback_query_id,
         callback_text='Unsupported action',
     )
@@ -215,8 +231,14 @@ def _get_profile_for_telegram_id(telegram_user_id):
 
 def _start_text(user, today):
     obligations = list(_open_obligations_for_user(user))
+    i_owe_units, owed_to_me_units, net_units = _portfolio_totals(user, obligations)
     lines = [
-        f'TrustTrack access confirmed for {_user_label(user)}.',
+        'TrustTrack',
+        f'User: {_user_label(user)}',
+        '',
+        f'I owe: {_format_money(i_owe_units)}',
+        f'Owed to me: {_format_money(owed_to_me_units)}',
+        f'Net: {_format_signed_money(net_units)}',
         '',
         'Choose an action below.',
         '',
@@ -239,16 +261,7 @@ def _help_text(user):
 
 def _balance_text(user):
     obligations = list(_open_obligations_for_user(user))
-    i_owe_units = 0
-    owed_to_me_units = 0
-    for obligation in obligations:
-        balance_units = get_obligation_balance(obligation)
-        if obligation.borrower_id == user.id:
-            i_owe_units += balance_units
-        if obligation.creditor_id == user.id:
-            owed_to_me_units += balance_units
-
-    net_units = owed_to_me_units - i_owe_units
+    i_owe_units, owed_to_me_units, net_units = _portfolio_totals(user, obligations)
     lines = [
         'TrustTrack balance',
         f'I owe: {_format_money(i_owe_units)}',
@@ -259,6 +272,20 @@ def _balance_text(user):
         lines.extend(['', 'Open obligations:'])
         lines.extend(_obligation_summary_line(user, obligation) for obligation in obligations)
     return '\n'.join(lines)
+
+
+def _portfolio_totals(user, obligations):
+    i_owe_units = 0
+    owed_to_me_units = 0
+    for obligation in obligations:
+        balance_units = get_obligation_balance(obligation)
+        if obligation.borrower_id == user.id:
+            i_owe_units += balance_units
+        if obligation.creditor_id == user.id:
+            owed_to_me_units += balance_units
+
+    net_units = owed_to_me_units - i_owe_units
+    return i_owe_units, owed_to_me_units, net_units
 
 
 def _obligation_text(user, args_text):
@@ -299,40 +326,53 @@ def _repayment_preview(user, chat_id, args_text, today, nonce_factory):
 
 
 def _pending_repayment_preview(user, telegram_user_id, chat_id, amount_text, today, nonce_factory):
-    obligation_id = PENDING_REPAYMENT_OBLIGATIONS.get(telegram_user_id)
+    pending_context = PENDING_REPAYMENT_OBLIGATIONS.get(telegram_user_id)
+    if isinstance(pending_context, dict):
+        obligation_id = pending_context.get('obligation_id')
+        panel_chat_id = pending_context.get('chat_id') or chat_id
+        panel_message_id = pending_context.get('message_id')
+    else:
+        obligation_id = pending_context
+        panel_chat_id = chat_id
+        panel_message_id = None
+
     obligation = _get_related_open_obligation(user, obligation_id)
     if not obligation:
         PENDING_REPAYMENT_OBLIGATIONS.pop(telegram_user_id, None)
-        return _single_message(
-            chat_id,
+        return _panel_result(
+            panel_chat_id,
+            panel_message_id,
             'This obligation is not available anymore.',
             reply_markup=_main_menu_markup(),
         )
 
     amount_units, error = _parse_amount_units(amount_text)
     if error:
-        return _single_message(
-            chat_id,
+        return _panel_result(
+            panel_chat_id,
+            panel_message_id,
             f'{error}\nSend only the amount, for example: 37.50',
             reply_markup=_repayment_amount_markup(obligation, get_obligation_balance(obligation, as_of=today)),
         )
 
     PENDING_REPAYMENT_OBLIGATIONS.pop(telegram_user_id, None)
     return _repayment_preview_for_obligation(
-        chat_id=chat_id,
+        chat_id=panel_chat_id,
         obligation=obligation,
         amount_units=amount_units,
         event_date=today,
         today=today,
         nonce_factory=nonce_factory,
+        message_id=panel_message_id,
     )
 
 
-def _repayment_preview_for_obligation(chat_id, obligation, amount_units, event_date, today, nonce_factory):
+def _repayment_preview_for_obligation(chat_id, obligation, amount_units, event_date, today, nonce_factory, message_id=None):
     balance_units = get_obligation_balance(obligation, as_of=event_date)
     if amount_units > balance_units:
-        return _single_message(
+        return _panel_result(
             chat_id,
+            message_id,
             f'Repayment cannot exceed the balance on {event_date.isoformat()}.\n'
             f'Balance: {_format_money(balance_units)}',
             reply_markup=_obligation_detail_markup(obligation),
@@ -346,8 +386,9 @@ def _repayment_preview_for_obligation(chat_id, obligation, amount_units, event_d
         f'Amount: {_format_money(amount_units)}',
         f'Date: {event_date.isoformat()}',
     ])
-    return _single_message(
+    return _panel_result(
         chat_id,
+        message_id,
         text,
         reply_markup={
             'inline_keyboard': [
@@ -397,12 +438,16 @@ def _repayment_menu_callback_response(user, data, today):
     )
 
 
-def _custom_repayment_callback_response(user, telegram_user_id, data):
+def _custom_repayment_callback_response(user, telegram_user_id, data, chat_id, message_id):
     obligation = _get_obligation_from_callback(user, data, 'customrepay')
     if not obligation:
         return 'This obligation is not available anymore.', _main_menu_markup()
 
-    PENDING_REPAYMENT_OBLIGATIONS[telegram_user_id] = obligation.pk
+    PENDING_REPAYMENT_OBLIGATIONS[telegram_user_id] = {
+        'obligation_id': obligation.pk,
+        'chat_id': chat_id,
+        'message_id': message_id,
+    }
     return (
         '\n'.join([
             f'Custom repayment for {obligation.title}',
@@ -596,13 +641,15 @@ def _obligation_detail_text(user, obligation):
     ])
 
 
-def _main_menu_markup():
-    return {
-        'inline_keyboard': [
-            [{'text': 'Balance', 'callback_data': 'menu:balance'}],
-            [{'text': 'Open obligations', 'callback_data': 'menu:obligations'}],
-        ],
-    }
+def _main_menu_markup(include_home=False):
+    rows = []
+    if include_home:
+        rows.append([{'text': 'Home', 'callback_data': 'menu:home'}])
+    rows.extend([
+        [{'text': 'Balance', 'callback_data': 'menu:balance'}],
+        [{'text': 'Open obligations', 'callback_data': 'menu:obligations'}],
+    ])
+    return {'inline_keyboard': rows}
 
 
 def _obligations_menu_markup(user):
@@ -615,7 +662,10 @@ def _obligations_menu_markup(user):
                 'callback_data': f'ob:{obligation.pk}',
             }
         ])
-    rows.append([{'text': 'Balance', 'callback_data': 'menu:balance'}])
+    rows.append([
+        {'text': 'Home', 'callback_data': 'menu:home'},
+        {'text': 'Balance', 'callback_data': 'menu:balance'},
+    ])
     return {'inline_keyboard': rows}
 
 
@@ -624,7 +674,10 @@ def _obligation_detail_markup(obligation):
         'inline_keyboard': [
             [{'text': 'Add repayment', 'callback_data': f'repaymenu:{obligation.pk}'}],
             [{'text': 'Back to obligations', 'callback_data': 'menu:obligations'}],
-            [{'text': 'Balance', 'callback_data': 'menu:balance'}],
+            [
+                {'text': 'Home', 'callback_data': 'menu:home'},
+                {'text': 'Balance', 'callback_data': 'menu:balance'},
+            ],
         ],
     }
 
@@ -682,3 +735,17 @@ def _confirmation_nonce():
 
 def _single_message(chat_id, text, reply_markup=None):
     return TelegramBotResult(messages=[TelegramOutgoingMessage(chat_id, text, reply_markup)])
+
+
+def _panel_result(chat_id, message_id, text, reply_markup=None):
+    return TelegramBotResult(messages=[_panel_message(chat_id, message_id, text, reply_markup)])
+
+
+def _panel_message(chat_id, message_id, text, reply_markup=None):
+    return TelegramOutgoingMessage(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=reply_markup,
+        message_id=message_id,
+        replace_existing=message_id is not None,
+    )
