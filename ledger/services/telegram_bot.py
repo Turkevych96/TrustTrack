@@ -4,18 +4,34 @@ from decimal import Decimal, InvalidOperation
 import secrets
 import shlex
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from ledger.models import LedgerTransaction, Obligation, UserProfile
+from ledger.models import (
+    EventSeries,
+    EventSeriesVersion,
+    FinancialEvent,
+    InterestRatePeriod,
+    LedgerTransaction,
+    Obligation,
+    UserProfile,
+)
 from ledger.services.balances import get_obligation_balance
-from ledger.services.events import post_repayment
+from ledger.services.events import post_principal_advance, post_repayment
 from ledger.services.money import decimal_from_units, units_from_decimal
 
 
 QUICK_REPAYMENT_AMOUNTS = (Decimal('25'), Decimal('50'), Decimal('100'))
 PENDING_REPAYMENT_OBLIGATIONS = {}
+PENDING_OBLIGATION_CREATIONS = {}
+DAY_NAMES = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
+ROLE_LENT = 'lent'
+ROLE_BORROWED = 'borrowed'
+PAYMENT_MODE_ONE_TIME = 'one_time'
+PAYMENT_MODE_RECURRING = 'recurring'
 
 
 @dataclass(frozen=True)
@@ -71,6 +87,15 @@ def _process_message(message, today, nonce_factory):
     if not text:
         return _single_message(chat_id, _help_text(profile.user), reply_markup=_main_menu_markup())
 
+    if not text.startswith('/') and telegram_user_id in PENDING_OBLIGATION_CREATIONS:
+        return _pending_obligation_creation_text(
+            profile.user,
+            telegram_user_id,
+            chat_id,
+            text,
+            today,
+        )
+
     if not text.startswith('/') and telegram_user_id in PENDING_REPAYMENT_OBLIGATIONS:
         return _pending_repayment_preview(
             profile.user,
@@ -86,9 +111,12 @@ def _process_message(message, today, nonce_factory):
     args_text = raw_args[0] if raw_args else ''
 
     if command in ('/start', '/help'):
+        _clear_pending_context(telegram_user_id)
         return _single_message(chat_id, _start_text(profile.user, today), reply_markup=_main_menu_markup())
     if command == '/balance':
         return _single_message(chat_id, _balance_text(profile.user), reply_markup=_main_menu_markup())
+    if command in ('/new', '/newobligation'):
+        return _single_message(chat_id, _new_obligation_role_text(), reply_markup=_new_obligation_role_markup())
     if command in ('/debt', '/obligation'):
         obligation = _find_obligation_from_code(profile.user, args_text.strip())
         if not obligation:
@@ -138,12 +166,14 @@ def _process_callback_query(callback_query, today, nonce_factory):
         )
 
     if data == 'noop:cancel':
+        _clear_pending_context(telegram_user_id)
         return TelegramBotResult(
             messages=[_panel_message(chat_id, message_id, 'Cancelled.', _main_menu_markup(include_home=True))],
             callback_query_id=callback_query_id,
             callback_text='Cancelled',
         )
     if data == 'menu:home':
+        _clear_pending_context(telegram_user_id)
         return TelegramBotResult(
             messages=[_panel_message(chat_id, message_id, _start_text(profile.user, today), _main_menu_markup())],
             callback_query_id=callback_query_id,
@@ -167,6 +197,26 @@ def _process_callback_query(callback_query, today, nonce_factory):
             ],
             callback_query_id=callback_query_id,
             callback_text='Obligations',
+        )
+    if data == 'menu:recent':
+        return TelegramBotResult(
+            messages=[
+                _panel_message(
+                    chat_id,
+                    message_id,
+                    _recent_transactions_text(profile.user),
+                    _main_menu_markup(include_home=True),
+                )
+            ],
+            callback_query_id=callback_query_id,
+            callback_text='Recent',
+        )
+    if data == 'menu:new_obligation':
+        _clear_pending_context(telegram_user_id)
+        return TelegramBotResult(
+            messages=[_panel_message(chat_id, message_id, _new_obligation_role_text(), _new_obligation_role_markup())],
+            callback_query_id=callback_query_id,
+            callback_text='New obligation',
         )
     if data.startswith('ob:'):
         text, reply_markup = _obligation_callback_response(profile.user, data)
@@ -194,6 +244,20 @@ def _process_callback_query(callback_query, today, nonce_factory):
             messages=[_panel_message(chat_id, message_id, text, reply_markup)],
             callback_query_id=callback_query_id,
             callback_text='Custom amount',
+        )
+    if data.startswith('newob:'):
+        text, reply_markup = _new_obligation_callback_response(
+            profile.user,
+            telegram_user_id,
+            data,
+            chat_id,
+            message_id,
+            today,
+        )
+        return TelegramBotResult(
+            messages=[_panel_message(chat_id, message_id, text, reply_markup)],
+            callback_query_id=callback_query_id,
+            callback_text='New obligation',
         )
     if data.startswith('repayamt:'):
         text, reply_markup = _repayment_amount_callback_response(profile.user, data, today, nonce_factory)
@@ -232,7 +296,7 @@ def _get_profile_for_telegram_id(telegram_user_id):
 def _start_text(user, today):
     obligations = list(_open_obligations_for_user(user))
     i_owe_units, owed_to_me_units, net_units = _portfolio_totals(user, obligations)
-    lines = [
+    return '\n'.join([
         'TrustTrack',
         f'User: {_user_label(user)}',
         '',
@@ -241,14 +305,7 @@ def _start_text(user, today):
         f'Net: {_format_signed_money(net_units)}',
         '',
         'Choose an action below.',
-        '',
-        'Open obligations:',
-    ]
-    if not obligations:
-        lines.append('No open obligations yet.')
-    else:
-        lines.extend(_obligation_summary_line(user, obligation, today=today) for obligation in obligations)
-    return '\n'.join(lines)
+    ])
 
 
 def _help_text(user):
@@ -274,6 +331,34 @@ def _balance_text(user):
     return '\n'.join(lines)
 
 
+def _recent_transactions_text(user):
+    obligations = list(_related_obligations_for_user(user))
+    if not obligations:
+        return 'No transactions yet.'
+
+    transactions = (
+        LedgerTransaction.objects
+        .filter(obligation__in=obligations, status=LedgerTransaction.Status.POSTED)
+        .select_related('obligation', 'financial_event')
+        .order_by('-transaction_date', '-created_at')[:10]
+    )
+    if not transactions:
+        return 'No transactions yet.'
+
+    lines = ['Recent transactions:', '']
+    for transaction_item in transactions:
+        event = transaction_item.financial_event
+        lines.append(
+            ' - '.join([
+                transaction_item.transaction_date.isoformat(),
+                transaction_item.obligation.title,
+                event.get_event_type_display(),
+                _format_signed_money(_event_user_net_impact_units(user, event, transaction_item.obligation)),
+            ])
+        )
+    return '\n'.join(lines)
+
+
 def _portfolio_totals(user, obligations):
     i_owe_units = 0
     owed_to_me_units = 0
@@ -286,6 +371,12 @@ def _portfolio_totals(user, obligations):
 
     net_units = owed_to_me_units - i_owe_units
     return i_owe_units, owed_to_me_units, net_units
+
+
+def _event_user_net_impact_units(user, event, obligation):
+    if event.direction == FinancialEvent.Direction.INCREASES_DEBT:
+        return event.amount_units if obligation.creditor_id == user.id else -event.amount_units
+    return -event.amount_units if obligation.creditor_id == user.id else event.amount_units
 
 
 def _obligation_text(user, args_text):
@@ -457,6 +548,266 @@ def _custom_repayment_callback_response(user, telegram_user_id, data, chat_id, m
     )
 
 
+def _new_obligation_callback_response(user, telegram_user_id, data, chat_id, message_id, today):
+    parts = data.split(':')
+    if len(parts) < 2:
+        return 'This action is not available anymore.', _main_menu_markup(include_home=True)
+
+    action = parts[1]
+    if action == 'role' and len(parts) == 3:
+        role = parts[2]
+        if role not in (ROLE_LENT, ROLE_BORROWED):
+            return 'Unsupported role.', _new_obligation_role_markup()
+        PENDING_OBLIGATION_CREATIONS[telegram_user_id] = {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'role': role,
+            'step': 'counterparty',
+        }
+        return _new_obligation_counterparty_text(role), _new_obligation_counterparty_markup(user)
+
+    context = PENDING_OBLIGATION_CREATIONS.get(telegram_user_id)
+    if not context:
+        return _new_obligation_role_text(), _new_obligation_role_markup()
+    context['chat_id'] = chat_id
+    context['message_id'] = message_id
+
+    if action == 'cancel':
+        PENDING_OBLIGATION_CREATIONS.pop(telegram_user_id, None)
+        return 'New obligation was cancelled.', _main_menu_markup(include_home=True)
+
+    if action == 'cp' and len(parts) == 3:
+        counterparty = _get_counterparty(user, parts[2])
+        if not counterparty:
+            return 'Choose an active counterparty from the list.', _new_obligation_counterparty_markup(user)
+        context['counterparty_id'] = counterparty.pk
+        context['step'] = 'title'
+        return _new_obligation_title_text(context, counterparty), _new_obligation_cancel_markup()
+
+    if action == 'date' and len(parts) == 3:
+        if parts[2] == 'today':
+            context['opened_on'] = today
+            context['step'] = 'schedule'
+            return _new_obligation_schedule_text(context), _new_obligation_schedule_markup()
+        if parts[2] == 'custom':
+            context['step'] = 'opened_on'
+            return 'Send opened date as YYYY-MM-DD.', _new_obligation_cancel_markup()
+        return 'Choose a date option.', _new_obligation_date_markup()
+
+    if action == 'schedule' and len(parts) == 3:
+        return _new_obligation_schedule_callback(context, parts[2])
+
+    if action == 'dom' and len(parts) == 3:
+        day_of_month, error = _parse_day_of_month(parts[2])
+        if error:
+            return error, _new_obligation_month_day_markup(context)
+        context['recurring_day_of_month'] = day_of_month
+        context['step'] = 'interest'
+        return _new_obligation_interest_text(context), _new_obligation_interest_markup()
+
+    if action == 'interest' and len(parts) == 3:
+        if parts[2] == 'no':
+            context['has_interest'] = False
+            context['annual_rate_percent'] = None
+            context['step'] = 'confirm'
+            return _new_obligation_confirm_text(user, context), _new_obligation_confirm_markup()
+        if parts[2] == 'yes':
+            context['has_interest'] = True
+            context['step'] = 'interest_rate'
+            return 'Send annual interest rate, for example: 3.5', _new_obligation_cancel_markup()
+        return 'Choose an interest option.', _new_obligation_interest_markup()
+
+    if action == 'create':
+        try:
+            obligation = _create_obligation_from_context(user, context)
+        except (ValidationError, ValueError) as error:
+            return _validation_error_text(error), _new_obligation_confirm_markup()
+        PENDING_OBLIGATION_CREATIONS.pop(telegram_user_id, None)
+        return _new_obligation_created_text(obligation), _main_menu_markup(include_home=True)
+
+    return 'This action is not available anymore.', _main_menu_markup(include_home=True)
+
+
+def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, today):
+    context = PENDING_OBLIGATION_CREATIONS.get(telegram_user_id)
+    if not context:
+        return _single_message(chat_id, _unknown_command_text(user), reply_markup=_main_menu_markup())
+
+    panel_chat_id = context.get('chat_id') or chat_id
+    panel_message_id = context.get('message_id')
+    step = context.get('step')
+
+    if step == 'counterparty':
+        return _panel_result(
+            panel_chat_id,
+            panel_message_id,
+            _new_obligation_counterparty_text(context.get('role')),
+            _new_obligation_counterparty_markup(user),
+        )
+
+    if step == 'title':
+        title = text.strip()
+        if not title or len(title) > 160:
+            return _panel_result(panel_chat_id, panel_message_id, 'Send a title up to 160 characters.', _new_obligation_cancel_markup())
+        context['title'] = title
+        context['step'] = 'amount'
+        return _panel_result(panel_chat_id, panel_message_id, 'Send initial amount, for example: 625.00', _new_obligation_cancel_markup())
+
+    if step == 'amount':
+        amount_units, error = _parse_amount_units(text)
+        if error:
+            return _panel_result(panel_chat_id, panel_message_id, error, _new_obligation_cancel_markup())
+        context['amount_units'] = amount_units
+        context['step'] = 'opened_on_choice'
+        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_date_text(), _new_obligation_date_markup())
+
+    if step == 'opened_on':
+        try:
+            context['opened_on'] = date.fromisoformat(text.strip())
+        except ValueError:
+            return _panel_result(panel_chat_id, panel_message_id, 'Opened date must use YYYY-MM-DD.', _new_obligation_cancel_markup())
+        context['step'] = 'schedule'
+        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_schedule_text(context), _new_obligation_schedule_markup())
+
+    if step == 'opened_on_choice':
+        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_date_text(), _new_obligation_date_markup())
+
+    if step == 'schedule':
+        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_schedule_text(context), _new_obligation_schedule_markup())
+
+    if step == 'day_of_month':
+        day_of_month, error = _parse_day_of_month(text)
+        if error:
+            return _panel_result(panel_chat_id, panel_message_id, error, _new_obligation_month_day_markup(context))
+        context['recurring_day_of_month'] = day_of_month
+        context['step'] = 'interest'
+        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_interest_text(context), _new_obligation_interest_markup())
+
+    if step == 'interest_rate':
+        try:
+            annual_rate_percent = Decimal(text.strip())
+        except InvalidOperation:
+            return _panel_result(panel_chat_id, panel_message_id, 'Interest rate must be a number, for example: 3.5', _new_obligation_cancel_markup())
+        if annual_rate_percent <= 0:
+            return _panel_result(panel_chat_id, panel_message_id, 'Interest rate must be greater than zero.', _new_obligation_cancel_markup())
+        context['annual_rate_percent'] = annual_rate_percent
+        context['step'] = 'confirm'
+        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_confirm_text(user, context), _new_obligation_confirm_markup())
+
+    if step == 'interest':
+        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_interest_text(context), _new_obligation_interest_markup())
+
+    return _panel_result(panel_chat_id, panel_message_id, _new_obligation_confirm_text(user, context), _new_obligation_confirm_markup())
+
+
+def _new_obligation_schedule_callback(context, schedule):
+    opened_on = context.get('opened_on')
+    if not opened_on:
+        return _new_obligation_date_text(), _new_obligation_date_markup()
+
+    if schedule == PAYMENT_MODE_ONE_TIME:
+        context['payment_mode'] = PAYMENT_MODE_ONE_TIME
+        context['step'] = 'interest'
+        return _new_obligation_interest_text(context), _new_obligation_interest_markup()
+
+    if schedule == EventSeries.Frequency.MONTHLY:
+        context['payment_mode'] = PAYMENT_MODE_RECURRING
+        context['recurring_frequency'] = EventSeries.Frequency.MONTHLY
+        context['recurring_starts_on'] = opened_on
+        context['step'] = 'day_of_month'
+        return _new_obligation_month_day_text(opened_on), _new_obligation_month_day_markup(context)
+
+    if schedule in (EventSeries.Frequency.WEEKLY, EventSeries.Frequency.BIWEEKLY):
+        context['payment_mode'] = PAYMENT_MODE_RECURRING
+        context['recurring_frequency'] = schedule
+        context['recurring_day_of_week'] = opened_on.weekday()
+        context['recurring_starts_on'] = opened_on
+        context['step'] = 'interest'
+        return _new_obligation_interest_text(context), _new_obligation_interest_markup()
+
+    return 'Choose a schedule option.', _new_obligation_schedule_markup()
+
+
+def _create_obligation_from_context(user, context):
+    required = ('role', 'counterparty_id', 'title', 'amount_units', 'opened_on', 'payment_mode')
+    if any(context.get(field_name) in (None, '') for field_name in required):
+        raise ValueError('New obligation is incomplete.')
+
+    counterparty = _get_counterparty(user, context['counterparty_id'])
+    if not counterparty:
+        raise ValueError('Counterparty is not available anymore.')
+
+    if context['role'] == ROLE_LENT:
+        creditor = user
+        borrower = counterparty
+    else:
+        creditor = counterparty
+        borrower = user
+
+    with transaction.atomic():
+        obligation = Obligation(
+            creditor=creditor,
+            borrower=borrower,
+            title=context['title'],
+            opened_on=context['opened_on'],
+        )
+        obligation.full_clean()
+        obligation.save()
+        post_principal_advance(
+            obligation,
+            amount_units=context['amount_units'],
+            event_date=context['opened_on'],
+            memo=f'Telegram obligation created by {_user_label(user)}',
+            category='telegram',
+        )
+        _create_recurring_series_from_context(obligation, context)
+        _create_interest_rate_from_context(obligation, context)
+    return obligation
+
+
+def _create_recurring_series_from_context(obligation, context):
+    if context.get('payment_mode') != PAYMENT_MODE_RECURRING:
+        return None
+
+    series = EventSeries(
+        obligation=obligation,
+        name=context['title'],
+        event_type=FinancialEvent.EventType.SCHEDULED_CHARGE,
+        frequency=context['recurring_frequency'],
+        day_of_month=context.get('recurring_day_of_month'),
+        day_of_week=context.get('recurring_day_of_week'),
+        starts_on=context.get('recurring_starts_on') or context['opened_on'],
+        memo='Created from Telegram.',
+    )
+    series.full_clean()
+    series.save()
+
+    version = EventSeriesVersion(
+        event_series=series,
+        amount_units=context['amount_units'],
+        valid_from=series.starts_on,
+        memo='Created from Telegram.',
+    )
+    version.full_clean()
+    version.save()
+    return series
+
+
+def _create_interest_rate_from_context(obligation, context):
+    if not context.get('has_interest'):
+        return None
+
+    rate = InterestRatePeriod(
+        obligation=obligation,
+        annual_rate_percent=context['annual_rate_percent'],
+        effective_from=context['opened_on'],
+        memo='Created from Telegram.',
+    )
+    rate.full_clean()
+    rate.save()
+    return rate
+
+
 def _repayment_amount_callback_response(user, data, today, nonce_factory):
     parts = data.split(':')
     if len(parts) != 3:
@@ -616,16 +967,56 @@ def _parse_amount_units(amount_text):
     return amount_units, ''
 
 
+def _parse_day_of_month(value):
+    try:
+        day_of_month = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None, 'Day of month must be a number from 1 to 31.'
+    if day_of_month < 1 or day_of_month > 31:
+        return None, 'Day of month must be from 1 to 31.'
+    return day_of_month, ''
+
+
+def _available_counterparties(user):
+    return (
+        get_user_model()
+        .objects
+        .filter(is_active=True)
+        .exclude(pk=user.pk)
+        .order_by('username')
+    )
+
+
+def _get_counterparty(user, raw_user_id):
+    try:
+        user_id = int(raw_user_id)
+    except (TypeError, ValueError):
+        return None
+    return _available_counterparties(user).filter(pk=user_id).first()
+
+
+def _clear_pending_context(telegram_user_id):
+    PENDING_REPAYMENT_OBLIGATIONS.pop(telegram_user_id, None)
+    PENDING_OBLIGATION_CREATIONS.pop(telegram_user_id, None)
+
+
 def _get_related_open_obligation(user, obligation_id):
     return _open_obligations_for_user(user).filter(pk=obligation_id).first()
 
 
-def _open_obligations_for_user(user):
+def _related_obligations_for_user(user):
     return (
         Obligation.objects
-        .filter(Q(creditor=user) | Q(borrower=user), status=Obligation.Status.OPEN)
+        .filter(Q(creditor=user) | Q(borrower=user))
         .select_related('borrower', 'creditor')
         .order_by('title', 'pk')
+    )
+
+
+def _open_obligations_for_user(user):
+    return (
+        _related_obligations_for_user(user)
+        .filter(status=Obligation.Status.OPEN)
     )
 
 
@@ -648,6 +1039,8 @@ def _main_menu_markup(include_home=False):
     rows.extend([
         [{'text': 'Balance', 'callback_data': 'menu:balance'}],
         [{'text': 'Open obligations', 'callback_data': 'menu:obligations'}],
+        [{'text': 'Recent transactions', 'callback_data': 'menu:recent'}],
+        [{'text': 'New obligation', 'callback_data': 'menu:new_obligation'}],
     ])
     return {'inline_keyboard': rows}
 
@@ -680,6 +1073,174 @@ def _obligation_detail_markup(obligation):
             ],
         ],
     }
+
+
+def _new_obligation_role_text():
+    return '\n'.join([
+        'New obligation',
+        '',
+        'Who are you in this obligation?',
+    ])
+
+
+def _new_obligation_role_markup():
+    return {
+        'inline_keyboard': [
+            [{'text': 'I lent money', 'callback_data': f'newob:role:{ROLE_LENT}'}],
+            [{'text': 'I borrowed money', 'callback_data': f'newob:role:{ROLE_BORROWED}'}],
+            [{'text': 'Home', 'callback_data': 'menu:home'}],
+        ],
+    }
+
+
+def _new_obligation_counterparty_text(role):
+    direction = 'Who borrowed from you?' if role == ROLE_LENT else 'Who lent money to you?'
+    return '\n'.join([
+        'New obligation',
+        '',
+        direction,
+    ])
+
+
+def _new_obligation_counterparty_markup(user):
+    rows = []
+    for counterparty in _available_counterparties(user):
+        rows.append([{'text': _user_label(counterparty), 'callback_data': f'newob:cp:{counterparty.pk}'}])
+    rows.append([{'text': 'Cancel', 'callback_data': 'newob:cancel'}])
+    return {'inline_keyboard': rows}
+
+
+def _new_obligation_title_text(context, counterparty):
+    return '\n'.join([
+        'New obligation',
+        f'Role: {_role_label(context["role"])}',
+        f'Counterparty: {_user_label(counterparty)}',
+        '',
+        'Send title.',
+    ])
+
+
+def _new_obligation_cancel_markup():
+    return {
+        'inline_keyboard': [
+            [{'text': 'Cancel', 'callback_data': 'newob:cancel'}],
+            [{'text': 'Home', 'callback_data': 'menu:home'}],
+        ],
+    }
+
+
+def _new_obligation_date_text():
+    return '\n'.join([
+        'New obligation',
+        '',
+        'Choose opened date.',
+    ])
+
+
+def _new_obligation_date_markup():
+    return {
+        'inline_keyboard': [
+            [{'text': 'Today', 'callback_data': 'newob:date:today'}],
+            [{'text': 'Custom date', 'callback_data': 'newob:date:custom'}],
+            [{'text': 'Cancel', 'callback_data': 'newob:cancel'}],
+        ],
+    }
+
+
+def _new_obligation_schedule_text(context):
+    return '\n'.join([
+        'New obligation',
+        f'Title: {context.get("title", "")}',
+        f'Amount: {_format_money(context.get("amount_units", 0))}',
+        f'Opened: {context["opened_on"].isoformat()}',
+        '',
+        'Choose payment schedule.',
+    ])
+
+
+def _new_obligation_schedule_markup():
+    return {
+        'inline_keyboard': [
+            [{'text': 'One-time payment', 'callback_data': f'newob:schedule:{PAYMENT_MODE_ONE_TIME}'}],
+            [{'text': 'Monthly recurring', 'callback_data': f'newob:schedule:{EventSeries.Frequency.MONTHLY}'}],
+            [{'text': 'Weekly recurring', 'callback_data': f'newob:schedule:{EventSeries.Frequency.WEEKLY}'}],
+            [{'text': 'Every 2 weeks', 'callback_data': f'newob:schedule:{EventSeries.Frequency.BIWEEKLY}'}],
+            [{'text': 'Cancel', 'callback_data': 'newob:cancel'}],
+        ],
+    }
+
+
+def _new_obligation_month_day_text(opened_on):
+    return '\n'.join([
+        'Monthly recurring',
+        '',
+        'Send day of month from 1 to 31, or use the opened-date day.',
+    ])
+
+
+def _new_obligation_month_day_markup(context):
+    opened_on = context.get('opened_on') or timezone.localdate()
+    return {
+        'inline_keyboard': [
+            [{'text': f'Use day {opened_on.day}', 'callback_data': f'newob:dom:{opened_on.day}'}],
+            [{'text': 'Cancel', 'callback_data': 'newob:cancel'}],
+        ],
+    }
+
+
+def _new_obligation_interest_text(context):
+    return '\n'.join([
+        'New obligation',
+        f'Title: {context.get("title", "")}',
+        f'Schedule: {_new_obligation_schedule_label(context)}',
+        '',
+        'Add interest?',
+    ])
+
+
+def _new_obligation_interest_markup():
+    return {
+        'inline_keyboard': [
+            [{'text': 'No interest', 'callback_data': 'newob:interest:no'}],
+            [{'text': 'With interest', 'callback_data': 'newob:interest:yes'}],
+            [{'text': 'Cancel', 'callback_data': 'newob:cancel'}],
+        ],
+    }
+
+
+def _new_obligation_confirm_text(user, context):
+    counterparty = get_user_model().objects.filter(pk=context.get('counterparty_id')).first()
+    counterparty_label = _user_label(counterparty) if counterparty else 'Unknown'
+    interest_label = 'No'
+    if context.get('has_interest'):
+        interest_label = f'{context["annual_rate_percent"]}% APR'
+    return '\n'.join([
+        'Create obligation?',
+        f'Title: {context.get("title", "")}',
+        f'Role: {_role_label(context.get("role"))}',
+        f'Counterparty: {counterparty_label}',
+        f'Amount: {_format_money(context.get("amount_units", 0))}',
+        f'Opened: {context.get("opened_on").isoformat()}',
+        f'Schedule: {_new_obligation_schedule_label(context)}',
+        f'Interest: {interest_label}',
+    ])
+
+
+def _new_obligation_confirm_markup():
+    return {
+        'inline_keyboard': [
+            [{'text': 'Create obligation', 'callback_data': 'newob:create'}],
+            [{'text': 'Cancel', 'callback_data': 'newob:cancel'}],
+        ],
+    }
+
+
+def _new_obligation_created_text(obligation):
+    return '\n'.join([
+        'Obligation created.',
+        f'Title: {obligation.title}',
+        f'Current balance: {_format_money(get_obligation_balance(obligation))}',
+    ])
 
 
 def _repayment_amount_markup(obligation, balance_units):
@@ -717,6 +1278,30 @@ def _format_money(amount_units):
 def _format_signed_money(amount_units):
     sign = '+' if amount_units >= 0 else '-'
     return f'{sign}{_format_money(abs(amount_units))}'
+
+
+def _role_label(role):
+    if role == ROLE_LENT:
+        return 'I lent money'
+    if role == ROLE_BORROWED:
+        return 'I borrowed money'
+    return 'Unknown'
+
+
+def _new_obligation_schedule_label(context):
+    if context.get('payment_mode') == PAYMENT_MODE_ONE_TIME:
+        return 'One-time payment'
+
+    frequency = context.get('recurring_frequency')
+    if frequency == EventSeries.Frequency.MONTHLY:
+        return f'Monthly, day {context.get("recurring_day_of_month")}'
+    if frequency == EventSeries.Frequency.WEEKLY:
+        day_name = DAY_NAMES[context.get('recurring_day_of_week') or 0]
+        return f'Weekly on {day_name}'
+    if frequency == EventSeries.Frequency.BIWEEKLY:
+        day_name = DAY_NAMES[context.get('recurring_day_of_week') or 0]
+        return f'Every 2 weeks on {day_name}'
+    return 'Recurring'
 
 
 def _validation_error_text(error):
