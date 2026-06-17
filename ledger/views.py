@@ -409,7 +409,8 @@ def obligation_recalculate(request, pk):
                 f"reversed {len(recurring_result['reversed_events'])} recurring event(s), "
                 f"generated {len(recurring_result['created_transactions'])} recurring event(s), "
                 f"reversed {len(interest_result['reversed_runs'])} interest month(s), and "
-                f"posted {len(interest_result['posted_runs'])} interest month(s)."
+                f"posted {len(interest_result['posted_runs'])} interest month(s). "
+                f"{len(interest_result['unchanged_runs'])} interest month(s) were already current."
             ),
         )
     except ValidationError as error:
@@ -438,7 +439,8 @@ def interest_recalculate(request, pk):
                     request,
                     (
                         f"Reversed {len(result['reversed_runs'])} old interest month(s) and "
-                        f"posted {len(result['posted_runs'])} recalculated month(s)."
+                        f"posted {len(result['posted_runs'])} recalculated month(s). "
+                        f"{len(result['unchanged_runs'])} interest month(s) were already current."
                     ),
                 )
                 return redirect('ledger:obligation_detail', pk=obligation.pk)

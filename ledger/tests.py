@@ -485,6 +485,36 @@ class InterestTests(LedgerTestCase):
             date(2026, 3, 1),
         ])
 
+    def test_recalculate_interest_leaves_unchanged_runs_alone(self):
+        post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
+        InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('10.0000'),
+            effective_from=date(2026, 1, 1),
+        )
+        january = post_monthly_interest(self.obligation, date(2026, 1, 1))
+        february = post_monthly_interest(self.obligation, date(2026, 2, 1))
+        transaction_count = LedgerTransaction.objects.count()
+
+        result = recalculate_interest_from(
+            self.obligation,
+            from_date=date(2026, 1, 1),
+            through_date=date(2026, 3, 15),
+        )
+
+        january.refresh_from_db()
+        february.refresh_from_db()
+        self.assertEqual(result['reversed_runs'], [])
+        self.assertEqual(result['reversal_transactions'], [])
+        self.assertEqual(result['posted_runs'], [])
+        self.assertEqual(result['unchanged_runs'], [january, february])
+        self.assertEqual(january.status, InterestAccrualRun.Status.POSTED)
+        self.assertEqual(february.status, InterestAccrualRun.Status.POSTED)
+        self.assertEqual(january.revision, 1)
+        self.assertEqual(february.revision, 1)
+        self.assertEqual(InterestAccrualRun.objects.count(), 2)
+        self.assertEqual(LedgerTransaction.objects.count(), transaction_count)
+
     def test_recalculate_interest_reverses_old_runs_and_posts_new_revisions(self):
         post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
         InterestRatePeriod.objects.create(
@@ -1169,6 +1199,18 @@ class ViewTests(LedgerTestCase):
             status=InterestAccrualRun.Status.POSTED,
         )
         self.assertEqual(january_interest.calculated_interest_amount_units, 16_986)
+
+        transaction_count = LedgerTransaction.objects.count()
+        financial_event_count = FinancialEvent.objects.count()
+        interest_run_count = InterestAccrualRun.objects.count()
+
+        with patch('ledger.services.recalculation.timezone.localdate', return_value=date(2026, 2, 15)):
+            second_response = self.client.post(reverse('ledger:obligation_recalculate', kwargs={'pk': self.obligation.pk}))
+
+        self.assertRedirects(second_response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        self.assertEqual(LedgerTransaction.objects.count(), transaction_count)
+        self.assertEqual(FinancialEvent.objects.count(), financial_event_count)
+        self.assertEqual(InterestAccrualRun.objects.count(), interest_run_count)
 
     def test_generate_due_charges_view_posts_due_recurring_events(self):
         current_month = timezone.localdate().replace(day=1)

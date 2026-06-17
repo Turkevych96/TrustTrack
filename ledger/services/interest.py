@@ -52,13 +52,17 @@ def calculate_monthly_interest(obligation, period_start):
 
 def post_monthly_interest(obligation, period_start):
     calculation = calculate_monthly_interest(obligation, period_start)
+    return _post_monthly_interest_calculation(obligation, calculation)
+
+
+def _post_monthly_interest_calculation(obligation, calculation):
     amount_units = calculation['amount_units']
     if amount_units <= 0:
         raise ValidationError('Calculated interest must be greater than zero to post.')
 
     period_start = calculation['period_start']
     period_end = calculation['period_end']
-
+    calculation_payload = _calculation_payload(calculation)
     with db_transaction.atomic():
         existing = InterestAccrualRun.objects.filter(
             obligation=obligation,
@@ -91,12 +95,7 @@ def post_monthly_interest(obligation, period_start):
             calculated_interest_amount_units=amount_units,
             ledger_transaction=ledger_transaction,
             status=InterestAccrualRun.Status.POSTED,
-            calculation_payload={
-                'period_start': period_start.isoformat(),
-                'period_end': period_end.isoformat(),
-                'amount_units': amount_units,
-                'daily_details': calculation['daily_details'],
-            },
+            calculation_payload=calculation_payload,
         )
         run.full_clean()
         run.save()
@@ -132,33 +131,54 @@ def recalculate_interest_from(obligation, from_date, through_date=None):
         'reversed_runs': [],
         'reversal_transactions': [],
         'posted_runs': [],
+        'unchanged_runs': [],
     }
     if first_period_start > last_period_start:
         return result
 
     with db_transaction.atomic():
-        runs_to_reverse = list(
-            InterestAccrualRun.objects.select_for_update()
-            .filter(
-                obligation=obligation,
-                period_start__gte=first_period_start,
-                period_start__lte=last_period_start,
-                status=InterestAccrualRun.Status.POSTED,
-            )
-            .order_by('period_start', 'revision')
-        )
-        for run in runs_to_reverse:
-            reversal_transaction = reverse_interest_run(run)
-            result['reversed_runs'].append(run)
-            result['reversal_transactions'].append(reversal_transaction)
-
         for period_start in iter_month_starts(first_period_start, last_period_start):
+            period_end = next_month_start(period_start)
+            existing_run = (
+                InterestAccrualRun.objects.select_for_update()
+                .filter(
+                    obligation=obligation,
+                    period_start=period_start,
+                    period_end=period_end,
+                    status=InterestAccrualRun.Status.POSTED,
+                )
+                .first()
+            )
             calculation = calculate_monthly_interest(obligation, period_start)
+            if existing_run and _run_matches_calculation(existing_run, calculation):
+                result['unchanged_runs'].append(existing_run)
+                continue
+
+            if existing_run:
+                reversal_transaction = reverse_interest_run(existing_run)
+                result['reversed_runs'].append(existing_run)
+                result['reversal_transactions'].append(reversal_transaction)
+
             if calculation['amount_units'] <= 0:
                 continue
-            result['posted_runs'].append(post_monthly_interest(obligation, period_start))
+            result['posted_runs'].append(_post_monthly_interest_calculation(obligation, calculation))
 
     return result
+
+
+def _run_matches_calculation(run, calculation):
+    if run.calculated_interest_amount_units != calculation['amount_units']:
+        return False
+    return run.calculation_payload == _calculation_payload(calculation)
+
+
+def _calculation_payload(calculation):
+    return {
+        'period_start': calculation['period_start'].isoformat(),
+        'period_end': calculation['period_end'].isoformat(),
+        'amount_units': calculation['amount_units'],
+        'daily_details': calculation['daily_details'],
+    }
 
 
 def reverse_interest_run(run):
