@@ -264,19 +264,18 @@ def _balance_text(user):
 def _obligation_text(user, args_text):
     obligation = _find_obligation_from_code(user, args_text.strip())
     if not obligation:
-        return 'Use an obligation code from /start, for example: /debt O12'
+        return 'Choose an obligation from the buttons in /start.'
 
     balance_units = get_obligation_balance(obligation)
     role = 'borrower' if obligation.borrower_id == user.id else 'creditor'
     counterparty = obligation.creditor if role == 'borrower' else obligation.borrower
     return '\n'.join([
-        f'{obligation.title} ({_obligation_code(obligation)})',
+        obligation.title,
         f'Role: {role}',
         f'Counterparty: {_user_label(counterparty)}',
         f'Current balance: {_format_money(balance_units)}',
         '',
-        'Use the repayment button below, or type a command such as:',
-        f'/repay {_obligation_code(obligation)} 25',
+        'Use the repayment button below.',
     ])
 
 
@@ -287,7 +286,7 @@ def _repayment_preview(user, chat_id, args_text, today, nonce_factory):
 
     obligation = _find_obligation_from_code(user, parsed['code'])
     if not obligation:
-        return _single_message(chat_id, 'Unknown obligation code. Use /start to see available codes.')
+        return _single_message(chat_id, 'Unknown obligation. Use /start and choose it from the buttons.')
 
     return _repayment_preview_for_obligation(
         chat_id=chat_id,
@@ -343,7 +342,7 @@ def _repayment_preview_for_obligation(chat_id, obligation, amount_units, event_d
     callback_data = f'repay:{obligation.pk}:{amount_units}:{event_date.isoformat()}:{nonce}'
     text = '\n'.join([
         'Confirm repayment',
-        f'Obligation: {obligation.title} ({_obligation_code(obligation)})',
+        f'Obligation: {obligation.title}',
         f'Amount: {_format_money(amount_units)}',
         f'Date: {event_date.isoformat()}',
     ])
@@ -389,7 +388,7 @@ def _repayment_menu_callback_response(user, data, today):
 
     return (
         '\n'.join([
-            f'Record repayment for {obligation.title} ({_obligation_code(obligation)})',
+            f'Record repayment for {obligation.title}',
             f'Current balance: {_format_money(balance_units)}',
             '',
             'Choose an amount:',
@@ -406,7 +405,7 @@ def _custom_repayment_callback_response(user, telegram_user_id, data):
     PENDING_REPAYMENT_OBLIGATIONS[telegram_user_id] = obligation.pk
     return (
         '\n'.join([
-            f'Custom repayment for {obligation.title} ({_obligation_code(obligation)})',
+            f'Custom repayment for {obligation.title}',
             'Send only the amount, for example: 37.50',
         ]),
         _obligation_detail_markup(obligation),
@@ -484,7 +483,7 @@ def _repayment_recorded_text(obligation, amount_units, event_date, already_recor
     heading = 'Repayment was already recorded.' if already_recorded else 'Repayment recorded.'
     return '\n'.join([
         heading,
-        f'Obligation: {obligation.title} ({_obligation_code(obligation)})',
+        f'Obligation: {obligation.title}',
         f'Amount: {_format_money(amount_units)}',
         f'Date: {event_date.isoformat()}',
         f'Current balance: {_format_money(balance_units)}',
@@ -495,22 +494,22 @@ def _parse_repayment_args(args_text, today):
     try:
         tokens = shlex.split(args_text)
     except ValueError:
-        return {'error': 'Could not parse repayment command. Example: /repay O12 25'}
+        return {'error': 'Could not parse repayment command. Use /start and choose repayment from the buttons.'}
 
     if len(tokens) < 2:
-        return {'error': 'Use: /repay O12 25 or /repay O12 25 2026-06-17'}
+        return {'error': 'Use /start and choose repayment from the buttons.'}
 
     code = tokens[0].upper()
     amount_units, error = _parse_amount_units(tokens[1])
     if error:
-        return {'error': f'{error} Example: /repay O12 25'}
+        return {'error': error}
 
     event_date = today
     if len(tokens) >= 3:
         try:
             event_date = date.fromisoformat(tokens[2])
         except ValueError:
-            return {'error': 'Repayment date must use YYYY-MM-DD. Example: /repay O12 25 2026-06-17'}
+            return {'error': 'Repayment date must use YYYY-MM-DD.'}
 
     if event_date > today:
         return {'error': 'Repayment date cannot be in the future.'}
@@ -535,8 +534,7 @@ def _obligation_summary_line(user, obligation, today=None):
     role = 'you owe' if obligation.borrower_id == user.id else 'owed to you'
     counterparty = obligation.creditor if obligation.borrower_id == user.id else obligation.borrower
     return (
-        f'{_obligation_code(obligation)} - {obligation.title} - '
-        f'{role} {_user_label(counterparty)} - {_format_money(balance_units)}'
+        f'{obligation.title} - {role} {_user_label(counterparty)} - {_format_money(balance_units)}'
     )
 
 
@@ -586,16 +584,12 @@ def _open_obligations_for_user(user):
     )
 
 
-def _obligation_code(obligation):
-    return f'O{obligation.pk}'
-
-
 def _obligation_detail_text(user, obligation):
     balance_units = get_obligation_balance(obligation)
     role = 'borrower' if obligation.borrower_id == user.id else 'creditor'
     counterparty = obligation.creditor if role == 'borrower' else obligation.borrower
     return '\n'.join([
-        f'{obligation.title} ({_obligation_code(obligation)})',
+        obligation.title,
         f'Role: {role}',
         f'Counterparty: {_user_label(counterparty)}',
         f'Current balance: {_format_money(balance_units)}',
