@@ -188,7 +188,6 @@ class TelegramBotTests(LedgerTestCase):
                 [{'text': 'Balance', 'callback_data': 'menu:balance'}],
                 [{'text': 'Open obligations', 'callback_data': 'menu:obligations'}],
                 [{'text': 'Recent transactions', 'callback_data': 'menu:recent'}],
-                [{'text': 'New obligation', 'callback_data': 'menu:new_obligation'}],
             ],
         )
 
@@ -307,6 +306,17 @@ class TelegramBotTests(LedgerTestCase):
         )
         self.assertTrue(list_result.messages[0].replace_existing)
         self.assertEqual(list_result.messages[0].message_id, 99)
+        self.assertEqual(
+            list_result.messages[0].reply_markup['inline_keyboard'][-2],
+            [{'text': 'New obligation', 'callback_data': 'menu:new_obligation'}],
+        )
+        self.assertEqual(
+            list_result.messages[0].reply_markup['inline_keyboard'][-1],
+            [
+                {'text': 'Home', 'callback_data': 'menu:home'},
+                {'text': 'Balance', 'callback_data': 'menu:balance'},
+            ],
+        )
         self.assertIn(self.obligation.title, list_result.messages[0].text)
         self.assertNotIn(f'O{self.obligation.pk}', list_result.messages[0].text)
         self.assertIn('Current balance: $100.00', detail_result.messages[0].text)

@@ -1040,7 +1040,6 @@ def _main_menu_markup(include_home=False):
         [{'text': 'Balance', 'callback_data': 'menu:balance'}],
         [{'text': 'Open obligations', 'callback_data': 'menu:obligations'}],
         [{'text': 'Recent transactions', 'callback_data': 'menu:recent'}],
-        [{'text': 'New obligation', 'callback_data': 'menu:new_obligation'}],
     ])
     return {'inline_keyboard': rows}
 
@@ -1055,6 +1054,7 @@ def _obligations_menu_markup(user):
                 'callback_data': f'ob:{obligation.pk}',
             }
         ])
+    rows.append([{'text': 'New obligation', 'callback_data': 'menu:new_obligation'}])
     rows.append([
         {'text': 'Home', 'callback_data': 'menu:home'},
         {'text': 'Balance', 'callback_data': 'menu:balance'},
