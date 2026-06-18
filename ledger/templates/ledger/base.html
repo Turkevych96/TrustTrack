@@ -276,6 +276,17 @@
             background: var(--danger);
         }
         .button.danger:hover { background: #8f1d14; }
+        .button:disabled,
+        .button[aria-disabled="true"] {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+        .button:disabled:hover {
+            background: var(--accent);
+        }
+        .button.danger:disabled:hover {
+            background: var(--danger);
+        }
         .icon-button {
             width: 36px;
             padding: 7px;

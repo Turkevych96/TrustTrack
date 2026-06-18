@@ -10,6 +10,7 @@ urlpatterns = [
     path('admin-panel/', views.admin_panel, name='admin_panel'),
     path('admin-panel/users/', views.admin_users, name='admin_users'),
     path('admin-panel/users/<int:pk>/edit/', views.admin_user_update, name='admin_user_update'),
+    path('admin-panel/users/<int:pk>/reset-password/', views.admin_user_reset_password, name='admin_user_reset_password'),
     path('admin-panel/profiles/', views.admin_profiles, name='admin_profiles'),
     path('admin-panel/profiles/<int:pk>/edit/', views.admin_profile_update, name='admin_profile_update'),
     path('admin-panel/profiles/<int:pk>/check-telegram/', views.admin_profile_check_telegram, name='admin_profile_check_telegram'),

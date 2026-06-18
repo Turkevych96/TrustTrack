@@ -11,6 +11,7 @@ from django.db.models import Count, Q
 from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.crypto import get_random_string
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -51,7 +52,7 @@ from ledger.services.money import decimal_from_units
 from ledger.services.planner import build_portfolio_projection, simulate_monthly_payment
 from ledger.services.recalculation import recalculate_obligation
 from ledger.services.recurring import generate_due_recurring_events, recalculate_due_recurring_events
-from ledger.services.telegram import TelegramLookupError, get_telegram_chat_identity
+from ledger.services.telegram import TelegramLookupError, get_telegram_chat_identity, send_telegram_message
 
 
 HISTORY_PREVIEW_LIMIT = 10
@@ -73,6 +74,7 @@ PASSWORD_RULE_CODES = {
     'password_too_common': 'common',
     'password_entirely_numeric': 'numeric',
 }
+PASSWORD_RESET_CHARACTERS = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
 
 def related_obligations(user):
@@ -96,6 +98,36 @@ def _ensure_user_profiles():
     ]
     if missing_profiles:
         UserProfile.objects.bulk_create(missing_profiles)
+
+
+def _generate_temporary_password():
+    random_part = get_random_string(18, PASSWORD_RESET_CHARACTERS)
+    return f'TT-{random_part}-9!'
+
+
+def _password_reset_telegram_status(user):
+    profile_obj, _ = UserProfile.objects.get_or_create(user=user)
+    if not user.is_active:
+        return profile_obj, False, 'The user account is inactive.'
+    if not profile_obj.telegram_id:
+        return profile_obj, False, 'Telegram ID is not set.'
+    if not profile_obj.telegram_checked_at:
+        return profile_obj, False, 'Telegram connection has not been checked yet.'
+    if profile_obj.telegram_lookup_error:
+        return profile_obj, False, f'Last Telegram check failed: {profile_obj.telegram_lookup_error}'
+    if profile_obj.telegram_chat_type != 'private':
+        return profile_obj, False, 'Password resets can only be sent to a verified private Telegram chat.'
+    return profile_obj, True, 'Ready to send a temporary password to Telegram.'
+
+
+def _password_reset_message(user, temporary_password):
+    return (
+        'TrustTrack password reset\n\n'
+        f'User: {user_label(user)}\n'
+        f'Username: {user.get_username()}\n'
+        f'Temporary password: {temporary_password}\n\n'
+        'Log in with this password and change it from Profile as soon as possible.'
+    )
 
 
 def signup(request):
@@ -210,6 +242,7 @@ def admin_user_update(request, pk):
 
     user_model = get_user_model()
     target_user = get_object_or_404(user_model, pk=pk)
+    password_reset_profile, password_reset_ready, password_reset_reason = _password_reset_telegram_status(target_user)
     if request.method == 'POST':
         form = AdminUserForm(request.POST, instance=target_user, actor=request.user)
         if form.is_valid():
@@ -225,8 +258,46 @@ def admin_user_update(request, pk):
         {
             'form': form,
             'target_user': target_user,
+            'password_reset_profile': password_reset_profile,
+            'password_reset_ready': password_reset_ready,
+            'password_reset_reason': password_reset_reason,
         },
     )
+
+
+@login_required
+@require_POST
+def admin_user_reset_password(request, pk):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    user_model = get_user_model()
+    target_user = get_object_or_404(user_model, pk=pk)
+    profile_obj, reset_ready, reset_reason = _password_reset_telegram_status(target_user)
+    if request.POST.get('reset_confirm_username') != target_user.username:
+        messages.error(request, 'Type the current username to confirm the password reset.')
+        return redirect('ledger:admin_user_update', pk=target_user.pk)
+    if not reset_ready:
+        messages.error(request, f'Password reset is not available: {reset_reason}')
+        return redirect('ledger:admin_user_update', pk=target_user.pk)
+
+    temporary_password = _generate_temporary_password()
+    try:
+        with transaction.atomic():
+            target_user.set_password(temporary_password)
+            target_user.save(update_fields=['password'])
+            send_telegram_message(
+                profile_obj.telegram_id,
+                _password_reset_message(target_user, temporary_password),
+            )
+    except TelegramLookupError as error:
+        messages.error(request, f'Telegram did not accept the reset message: {error}')
+    else:
+        messages.success(
+            request,
+            f'Telegram accepted the reset message for {target_user.username}. The password was reset.',
+        )
+    return redirect('ledger:admin_user_update', pk=target_user.pk)
 
 
 @login_required

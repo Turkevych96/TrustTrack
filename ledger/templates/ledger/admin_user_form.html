@@ -29,6 +29,56 @@
     </div>
 </div>
 
+<section class="panel setting-panel section-gap">
+    <div class="setting-head">
+        <div>
+            <h2>Password reset via Telegram</h2>
+            <div class="muted">{{ password_reset_reason }}</div>
+        </div>
+        {% if password_reset_ready %}
+            <span class="badge">Ready</span>
+        {% else %}
+            <span class="badge">Unavailable</span>
+        {% endif %}
+    </div>
+
+    <div class="setting-summary">
+        <div>
+            <div class="metric-label">Telegram ID</div>
+            <div class="setting-value">{% if password_reset_profile.telegram_id %}{{ password_reset_profile.telegram_id }}{% else %}<span class="muted">Not set</span>{% endif %}</div>
+        </div>
+        <div>
+            <div class="metric-label">Telegram user</div>
+            <div class="setting-value">{% if password_reset_profile.telegram_display_name %}{{ password_reset_profile.telegram_display_name }}{% else %}<span class="muted">Not verified</span>{% endif %}</div>
+        </div>
+        <div>
+            <div class="metric-label">Chat type</div>
+            {% if password_reset_profile.telegram_chat_type %}
+                <span class="badge">{{ password_reset_profile.telegram_chat_type }}</span>
+            {% else %}
+                <span class="muted">Not checked</span>
+            {% endif %}
+        </div>
+        <div>
+            <div class="metric-label">Last checked</div>
+            <div>{% if password_reset_profile.telegram_checked_at %}{{ password_reset_profile.telegram_checked_at|date:"M. j, Y H:i" }}{% else %}<span class="muted">Never</span>{% endif %}</div>
+        </div>
+    </div>
+
+    <form class="form-grid" method="post" action="{% url 'ledger:admin_user_reset_password' target_user.pk %}">
+        {% csrf_token %}
+        <div>
+            <label for="id_reset_confirm_username">Confirm username</label>
+            <input id="id_reset_confirm_username" name="reset_confirm_username" type="text" autocomplete="off" {% if not password_reset_ready %}disabled{% endif %}>
+            <div class="muted">Type "{{ target_user.username }}" to generate a temporary password and send it to Telegram.</div>
+        </div>
+        <div class="actions">
+            <button class="button danger" type="submit" {% if not password_reset_ready %}disabled{% endif %}>Reset password</button>
+            <a class="button secondary" href="{% url 'ledger:admin_profile_update' password_reset_profile.pk %}">Edit profile</a>
+        </div>
+    </form>
+</section>
+
 <form class="panel form-grid section-gap" method="post">
     {% csrf_token %}
     {{ form.non_field_errors }}

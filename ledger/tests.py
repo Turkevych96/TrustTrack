@@ -1275,6 +1275,129 @@ class ViewTests(LedgerTestCase):
         self.assertTrue(staff_user.is_active)
         self.assertTrue(staff_user.is_staff)
 
+    def test_admin_user_edit_shows_telegram_password_reset_panel(self):
+        profile = UserProfile.objects.create(
+            user=self.borrower_user,
+            telegram_id=555,
+            telegram_chat_type='private',
+            telegram_username='andrii_t',
+            telegram_checked_at=timezone.now(),
+        )
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        response = self.client.get(reverse('ledger:admin_user_update', kwargs={'pk': self.borrower_user.pk}))
+
+        self.assertContains(response, 'Password reset via Telegram')
+        self.assertContains(response, 'Ready to send a temporary password to Telegram.')
+        self.assertContains(response, reverse('ledger:admin_user_reset_password', kwargs={'pk': self.borrower_user.pk}))
+        self.assertContains(response, reverse('ledger:admin_profile_update', kwargs={'pk': profile.pk}))
+
+    def test_admin_user_password_reset_requires_confirmed_username(self):
+        target_user = get_user_model().objects.create_user(username='reset_target', password='OldPass123!')
+        UserProfile.objects.create(
+            user=target_user,
+            telegram_id=555,
+            telegram_chat_type='private',
+            telegram_checked_at=timezone.now(),
+        )
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        with patch('ledger.views.send_telegram_message') as send_message:
+            response = self.client.post(
+                reverse('ledger:admin_user_reset_password', kwargs={'pk': target_user.pk}),
+                {'reset_confirm_username': 'wrong'},
+            )
+
+        self.assertRedirects(response, reverse('ledger:admin_user_update', kwargs={'pk': target_user.pk}))
+        send_message.assert_not_called()
+        target_user.refresh_from_db()
+        self.assertTrue(target_user.check_password('OldPass123!'))
+
+    def test_admin_user_password_reset_requires_verified_active_private_telegram(self):
+        inactive_user = get_user_model().objects.create_user(
+            username='inactive_reset',
+            password='OldPass123!',
+            is_active=False,
+        )
+        UserProfile.objects.create(
+            user=inactive_user,
+            telegram_id=555,
+            telegram_chat_type='private',
+            telegram_checked_at=timezone.now(),
+        )
+        unverified_user = get_user_model().objects.create_user(username='unverified_reset', password='OldPass123!')
+        UserProfile.objects.create(user=unverified_user, telegram_id=777)
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        with patch('ledger.views.send_telegram_message') as send_message:
+            inactive_response = self.client.post(
+                reverse('ledger:admin_user_reset_password', kwargs={'pk': inactive_user.pk}),
+                {'reset_confirm_username': inactive_user.username},
+            )
+            unverified_response = self.client.post(
+                reverse('ledger:admin_user_reset_password', kwargs={'pk': unverified_user.pk}),
+                {'reset_confirm_username': unverified_user.username},
+            )
+
+        self.assertRedirects(inactive_response, reverse('ledger:admin_user_update', kwargs={'pk': inactive_user.pk}))
+        self.assertRedirects(unverified_response, reverse('ledger:admin_user_update', kwargs={'pk': unverified_user.pk}))
+        send_message.assert_not_called()
+        inactive_user.refresh_from_db()
+        unverified_user.refresh_from_db()
+        self.assertTrue(inactive_user.check_password('OldPass123!'))
+        self.assertTrue(unverified_user.check_password('OldPass123!'))
+
+    def test_admin_user_password_reset_rolls_back_when_telegram_fails(self):
+        target_user = get_user_model().objects.create_user(username='reset_target', password='OldPass123!')
+        UserProfile.objects.create(
+            user=target_user,
+            telegram_id=555,
+            telegram_chat_type='private',
+            telegram_checked_at=timezone.now(),
+        )
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        with patch('ledger.views.send_telegram_message', side_effect=TelegramLookupError('Telegram failed.')):
+            response = self.client.post(
+                reverse('ledger:admin_user_reset_password', kwargs={'pk': target_user.pk}),
+                {'reset_confirm_username': target_user.username},
+            )
+
+        self.assertRedirects(response, reverse('ledger:admin_user_update', kwargs={'pk': target_user.pk}))
+        target_user.refresh_from_db()
+        self.assertTrue(target_user.check_password('OldPass123!'))
+
+    def test_admin_user_password_reset_sends_temporary_password_and_changes_password(self):
+        target_user = get_user_model().objects.create_user(username='reset_target', password='OldPass123!')
+        UserProfile.objects.create(
+            user=target_user,
+            telegram_id=555,
+            telegram_chat_type='private',
+            telegram_checked_at=timezone.now(),
+        )
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        with patch('ledger.views.send_telegram_message', return_value={'message_id': 123}) as send_message:
+            response = self.client.post(
+                reverse('ledger:admin_user_reset_password', kwargs={'pk': target_user.pk}),
+                {'reset_confirm_username': target_user.username},
+            )
+
+        self.assertRedirects(response, reverse('ledger:admin_user_update', kwargs={'pk': target_user.pk}))
+        send_message.assert_called_once()
+        chat_id, message_text = send_message.call_args.args
+        temporary_password = message_text.split('Temporary password: ', 1)[1].splitlines()[0]
+        self.assertEqual(chat_id, 555)
+        self.assertIn('TrustTrack password reset', message_text)
+        target_user.refresh_from_db()
+        self.assertFalse(target_user.check_password('OldPass123!'))
+        self.assertTrue(target_user.check_password(temporary_password))
+
     def test_admin_panel_links_to_profiles_and_categories_interfaces(self):
         staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
         self.client.force_login(staff_user)
