@@ -29,6 +29,7 @@ db.sqlite3-journal
 identifier.sqlite
 backups/
 docker-data/
+data/
 media/
 staticfiles/
 static/

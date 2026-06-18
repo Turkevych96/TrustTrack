@@ -16,5 +16,5 @@ services:
       - "${TRUSTTRACK_BIND_IP:-127.0.0.1}:${TRUSTTRACK_PORT:-8000}:8000"
     volumes:
       - type: bind
-        source: ${TRUSTTRACK_DATA_DIR:-./docker-data}
+        source: ${TRUSTTRACK_DATA_DIR:-./data}
         target: /data

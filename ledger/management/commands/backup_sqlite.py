@@ -46,7 +46,7 @@ class Command(BaseCommand):
         output_dir = Path(
             options['output_dir']
             or os.environ.get('TRUSTTRACK_BACKUP_DIR')
-            or Path(settings.BASE_DIR) / 'backups'
+            or Path(settings.BASE_DIR) / 'data' / 'backups'
         )
         result = create_sqlite_backup(
             source_path=source_path,

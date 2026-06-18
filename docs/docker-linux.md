@@ -134,7 +134,7 @@ If you already have a local database, stop the container and copy it to the host
 
 ```bash
 docker compose down
-cp db.sqlite3 /opt/trusttrack/data/db.sqlite3
+cp data/db.sqlite3 /opt/trusttrack/data/db.sqlite3
 docker compose up -d
 ```
 

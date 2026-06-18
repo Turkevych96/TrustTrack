@@ -17,7 +17,7 @@ The project is intentionally simple: classic Django, SQLite, and server-rendered
 
 - Python >= 3.14
 - Django 6
-- SQLite via `db.sqlite3`
+- SQLite via `data/db.sqlite3`
 - Dependency management with `uv`
 - Classic Django views, forms, templates, and Django admin
 
@@ -52,7 +52,7 @@ Keep `.env` local. It is ignored by Git and is the right place for values like `
 
 ## Database Setup
 
-The project uses a local SQLite database file named `db.sqlite3`.
+The project uses a local SQLite database file at `data/db.sqlite3`.
 
 This file is not meant to be committed to the repository. Django will create it locally when migrations are applied.
 
@@ -62,7 +62,7 @@ Run migrations:
 uv run python manage.py migrate
 ```
 
-This creates or updates `db.sqlite3` with the required Django tables, including authentication and admin tables.
+This creates or updates `data/db.sqlite3` with the required Django tables, including authentication and admin tables.
 
 ## Create an Admin User
 
@@ -127,7 +127,7 @@ The site stays local at `http://127.0.0.1:8000/`. The bot uses Telegram polling 
 
 The due job scheduler runs automatically while the local stack is alive. It generates due recurring events and posts due monthly interest without rebuilding the app. If the computer was off, the next scheduler run catches up through the current date without duplicating already generated items.
 
-The SQLite backup scheduler also starts with the local stack. It creates dated backups in `backups/` and keeps the newest 30 by default. Backups are local-only and ignored by Git.
+The SQLite backup scheduler also starts with the local stack. It creates dated backups in `data/backups/` and keeps the newest 30 by default. Backups are local-only and ignored by Git.
 
 ## Run With Docker On Linux
 
@@ -172,13 +172,13 @@ uv run python manage.py backup_sqlite --once --output-dir D:\TrustTrackBackups -
 
 ## Local Development Notes
 
-- Keep `db.sqlite3` local.
-- Do not commit `.venv/`, `db.sqlite3`, logs, caches, or IDE files.
+- Keep `data/db.sqlite3` local.
+- Do not commit `.venv/`, `data/`, logs, caches, or IDE files.
 - Use Django migrations whenever models change.
 - This project should stay simple and easy to run locally.
 
 ## Backup and Restore
-Because `db.sqlite3` is ignored by Git to prevent merge conflicts, keep backup copies of your financial data.
+Because `data/db.sqlite3` is ignored by Git to prevent merge conflicts, keep backup copies of your financial data.
 
 The recommended local backup command creates a consistent SQLite snapshot with a timestamped filename:
 
@@ -197,7 +197,7 @@ Restore from a SQLite backup:
 
 ```powershell
 .\scripts\stop-trusttrack.ps1
-copy .\backups\trusttrack-YYYYMMDD-HHMMSS.sqlite3 .\db.sqlite3
+copy .\data\backups\trusttrack-YYYYMMDD-HHMMSS.sqlite3 .\data\db.sqlite3
 .\scripts\start-trusttrack.ps1
 ```
 

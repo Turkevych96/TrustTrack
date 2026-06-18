@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_SQLITE_PATH = BASE_DIR / 'data' / 'db.sqlite3'
 
 load_dotenv(BASE_DIR / '.env')
 
@@ -111,7 +112,7 @@ WSGI_APPLICATION = 'trusttrack.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': Path(os.environ.get('TRUSTTRACK_SQLITE_PATH', BASE_DIR / 'db.sqlite3')),
+        'NAME': Path(os.environ.get('TRUSTTRACK_SQLITE_PATH', DEFAULT_SQLITE_PATH)),
     }
 }
 

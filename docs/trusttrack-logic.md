@@ -590,7 +590,7 @@ Acceptance criteria:
 
 - backup/restore instructions are verified against the current app shape
 - docs mention what data is included
-- docs mention that `db.sqlite3` stays local and uncommitted
+- docs mention that `data/db.sqlite3` stays local and uncommitted
 
 ## Test Strategy
 
