@@ -50,6 +50,9 @@ class Command(BaseCommand):
             help='Process used for the Django site.',
         )
         parser.add_argument('--gunicorn-workers', type=int, default=2, help='Gunicorn worker count.')
+        parser.add_argument('--gunicorn-threads', type=int, default=4, help='Gunicorn thread count per worker.')
+        parser.add_argument('--gunicorn-timeout', type=int, default=120, help='Seconds before Gunicorn restarts a silent worker.')
+        parser.add_argument('--gunicorn-keep-alive', type=int, default=5, help='Seconds to wait for keep-alive requests.')
         parser.add_argument('--no-site', action='store_true', help='Do not start the Django development site.')
         parser.add_argument('--no-bot', action='store_true', help='Do not start the Telegram bot.')
         parser.add_argument('--no-scheduler', action='store_true', help='Do not start the due job scheduler.')
@@ -156,6 +159,14 @@ class Command(BaseCommand):
                 f'{options["host"]}:{options["port"]}',
                 '--workers',
                 str(options['gunicorn_workers']),
+                '--worker-class',
+                'gthread',
+                '--threads',
+                str(options['gunicorn_threads']),
+                '--timeout',
+                str(options['gunicorn_timeout']),
+                '--keep-alive',
+                str(options['gunicorn_keep_alive']),
                 '--access-logfile',
                 '-',
                 '--error-logfile',

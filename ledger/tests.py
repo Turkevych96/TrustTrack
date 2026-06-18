@@ -1162,6 +1162,12 @@ class BackupTests(SimpleTestCase):
                 '9000',
                 '--gunicorn-workers',
                 '3',
+                '--gunicorn-threads',
+                '7',
+                '--gunicorn-timeout',
+                '99',
+                '--gunicorn-keep-alive',
+                '8',
                 stdout=StringIO(),
                 stderr=StringIO(),
             )
@@ -1171,7 +1177,11 @@ class BackupTests(SimpleTestCase):
         self.assertIn('gunicorn', started_commands[0])
         self.assertIn('trusttrack.wsgi:application', started_commands[0])
         self.assertIn('0.0.0.0:9000', started_commands[0])
+        self.assertIn('gthread', started_commands[0])
         self.assertIn('3', started_commands[0])
+        self.assertIn('7', started_commands[0])
+        self.assertIn('99', started_commands[0])
+        self.assertIn('8', started_commands[0])
 
     def _create_source_database(self, source_path):
         with closing(sqlite3.connect(source_path)) as connection:
