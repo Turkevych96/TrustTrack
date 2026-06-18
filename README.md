@@ -98,13 +98,13 @@ http://127.0.0.1:8000/admin/
 
 Use the admin username and password created with `createsuperuser`.
 
-## Run The Local Site And Telegram Bot
+## Run The Local Site, Telegram Bot, And Scheduler
 
-For the local family setup, TrustTrack can run the Django site and Telegram polling bot together without exposing the site to the internet.
+For the local family setup, TrustTrack can run the Django site, Telegram polling bot, and due job scheduler together without exposing the site to the internet.
 
 Make sure `.env` contains `TELEGRAM_BOT_TOKEN`, and each allowed user has their Telegram ID saved in Profile.
 
-Start both processes with one foreground command:
+Start all local processes with one foreground command:
 
 ```bash
 uv run python manage.py run_trusttrack
@@ -124,6 +124,20 @@ Check or stop it:
 ```
 
 The site stays local at `http://127.0.0.1:8000/`. The bot uses Telegram polling and only responds to Telegram IDs saved in TrustTrack profiles.
+
+The due job scheduler runs automatically while the local stack is alive. It generates due recurring events and posts due monthly interest without rebuilding the app. If the computer was off, the next scheduler run catches up through the current date without duplicating already generated items.
+
+Run due jobs manually once:
+
+```bash
+uv run python manage.py run_due_jobs --once
+```
+
+Run through a specific date:
+
+```bash
+uv run python manage.py run_due_jobs --once --date 2026-06-18
+```
 
 ## Local Development Notes
 

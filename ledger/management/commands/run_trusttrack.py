@@ -37,13 +37,15 @@ class ManagedProcess:
 
 
 class Command(BaseCommand):
-    help = 'Run the local TrustTrack site and Telegram bot together.'
+    help = 'Run the local TrustTrack site, Telegram bot, and due job scheduler together.'
 
     def add_arguments(self, parser):
         parser.add_argument('--host', default='127.0.0.1', help='Local address for the Django site.')
         parser.add_argument('--port', type=int, default=8005, help='Local port for the Django site.')
         parser.add_argument('--no-site', action='store_true', help='Do not start the Django development site.')
         parser.add_argument('--no-bot', action='store_true', help='Do not start the Telegram bot.')
+        parser.add_argument('--no-scheduler', action='store_true', help='Do not start the due job scheduler.')
+        parser.add_argument('--scheduler-interval', type=int, default=3600, help='Seconds between due job scheduler runs.')
         parser.add_argument('--restart-delay', type=float, default=5.0, help='Seconds to wait before restarting a crashed child process.')
         parser.add_argument('--max-restarts', type=int, default=5, help='Maximum restarts inside the restart window.')
         parser.add_argument('--restart-window', type=float, default=60.0, help='Restart window in seconds.')
@@ -77,8 +79,23 @@ class Command(BaseCommand):
                 )
             )
 
+        if not options['no_scheduler']:
+            services.append(
+                ManagedProcess(
+                    name='due job scheduler',
+                    command=[
+                        sys.executable,
+                        str(manage_py),
+                        'run_due_jobs',
+                        '--interval',
+                        str(options['scheduler_interval']),
+                    ],
+                    cwd=base_dir,
+                )
+            )
+
         if not services:
-            raise CommandError('Nothing to run. Remove --no-site or --no-bot.')
+            raise CommandError('Nothing to run. Remove --no-site, --no-bot, or --no-scheduler.')
 
         for service in services:
             self.stdout.write(f'Starting {service.name}...')

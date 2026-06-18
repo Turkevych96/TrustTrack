@@ -1,9 +1,11 @@
 from datetime import date
 from decimal import Decimal
+from io import StringIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 from django.urls import reverse
@@ -22,6 +24,7 @@ from ledger.models import (
 )
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import ensure_obligation_accounts, post_principal_advance, post_repayment, post_scheduled_charge
+from ledger.services.due_jobs import run_due_jobs
 from ledger.services.interest import (
     calculate_monthly_interest,
     generate_due_interest,
@@ -1020,6 +1023,98 @@ class InterestTests(LedgerTestCase):
         self.assertEqual([run.revision for run in posted_runs], [2, 2])
         self.assertEqual([run.calculated_interest_amount_units for run in posted_runs], [23_000, 14_176])
         self.assertLess(get_obligation_balance(self.obligation), old_balance)
+
+
+class DueJobTests(LedgerTestCase):
+    def test_run_due_jobs_generates_due_recurring_and_interest_once(self):
+        post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Rent',
+            day_of_month=1,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=1_000_000,
+            valid_from=date(2026, 1, 1),
+        )
+        InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('10.0000'),
+            effective_from=date(2026, 1, 1),
+        )
+
+        first_result = run_due_jobs(through_date=date(2026, 4, 15))
+        second_result = run_due_jobs(through_date=date(2026, 4, 15))
+
+        self.assertEqual(first_result.obligation_count, 1)
+        self.assertEqual(first_result.recurring_created, 4)
+        self.assertEqual(first_result.interest_posted, 3)
+        self.assertEqual(first_result.error_count, 0)
+        self.assertEqual(second_result.recurring_created, 0)
+        self.assertEqual(second_result.interest_posted, 0)
+        self.assertEqual(
+            FinancialEvent.objects.filter(
+                obligation=self.obligation,
+                source=FinancialEvent.Source.GENERATED,
+                event_series=series,
+                voided_at__isnull=True,
+            ).count(),
+            4,
+        )
+        self.assertEqual(
+            InterestAccrualRun.objects.filter(
+                obligation=self.obligation,
+                status=InterestAccrualRun.Status.POSTED,
+            ).count(),
+            3,
+        )
+
+    def test_run_due_jobs_command_once_outputs_summary(self):
+        output = StringIO()
+        errors = StringIO()
+
+        call_command(
+            'run_due_jobs',
+            '--once',
+            '--date',
+            '2026-04-15',
+            stdout=output,
+            stderr=errors,
+        )
+
+        self.assertIn('Due jobs through 2026-04-15', output.getvalue())
+        self.assertIn('checked 1 open obligation(s)', output.getvalue())
+        self.assertEqual(errors.getvalue(), '')
+
+    def test_run_trusttrack_can_start_due_scheduler_process(self):
+        started_commands = []
+
+        def remember_command(process):
+            started_commands.append(process.command)
+
+        with (
+            patch('ledger.management.commands.run_trusttrack.ManagedProcess.start', autospec=True) as start,
+            patch('ledger.management.commands.run_trusttrack.ManagedProcess.poll', autospec=True, return_value=None),
+            patch('ledger.management.commands.run_trusttrack.ManagedProcess.stop', autospec=True),
+            patch('ledger.management.commands.run_trusttrack.time.sleep', side_effect=KeyboardInterrupt),
+        ):
+            start.side_effect = remember_command
+            call_command(
+                'run_trusttrack',
+                '--no-site',
+                '--no-bot',
+                '--scheduler-interval',
+                '7',
+                stdout=StringIO(),
+                stderr=StringIO(),
+            )
+
+        self.assertEqual(len(started_commands), 1)
+        self.assertIn('run_due_jobs', started_commands[0])
+        self.assertIn('--interval', started_commands[0])
+        self.assertIn('7', started_commands[0])
 
 
 class PlannerTests(LedgerTestCase):
