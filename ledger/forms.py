@@ -126,6 +126,41 @@ class AdminUserForm(forms.ModelForm):
         return cleaned_data
 
 
+class AdminProfileForm(forms.ModelForm):
+    class Meta:
+        model = UserProfile
+        fields = ('telegram_id', 'show_planner_module', 'show_dashboard_balance_history')
+        labels = {
+            'telegram_id': 'Telegram ID',
+            'show_planner_module': 'Planner',
+            'show_dashboard_balance_history': 'Dashboard balance history',
+        }
+        help_texts = {
+            'telegram_id': 'Leave blank to disconnect Telegram for this profile.',
+            'show_planner_module': 'Show Planner in this user navigation bar.',
+            'show_dashboard_balance_history': 'Show the Balance history chart on this user dashboard.',
+        }
+        widgets = {
+            'telegram_id': forms.NumberInput(attrs={'min': '1', 'step': '1'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['telegram_id'].min_value = 1
+
+
+class AdminCategoryForm(forms.ModelForm):
+    class Meta:
+        model = ObligationCategory
+        fields = ('name', 'active')
+        labels = {
+            'active': 'Available for new obligations',
+        }
+        help_texts = {
+            'active': 'Inactive categories remain on existing obligations but are hidden from new obligation forms.',
+        }
+
+
 class CreateObligationForm(MoneyForm):
     ROLE_LENT = 'lent'
     ROLE_BORROWED = 'borrowed'

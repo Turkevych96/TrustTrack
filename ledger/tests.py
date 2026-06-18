@@ -34,7 +34,7 @@ from ledger.services.recurring import (
     generate_recurring_events_for_month,
     recalculate_due_recurring_events,
 )
-from ledger.services.telegram import TelegramChatIdentity
+from ledger.services.telegram import TelegramChatIdentity, TelegramLookupError
 from ledger.services.telegram_bot import PENDING_OBLIGATION_CREATIONS, PENDING_REPAYMENT_OBLIGATIONS, process_telegram_update
 from ledger.templatetags.money import money_units
 
@@ -1274,6 +1274,139 @@ class ViewTests(LedgerTestCase):
         staff_user.refresh_from_db()
         self.assertTrue(staff_user.is_active)
         self.assertTrue(staff_user.is_staff)
+
+    def test_admin_panel_links_to_profiles_and_categories_interfaces(self):
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        response = self.client.get(reverse('ledger:admin_panel'))
+
+        self.assertContains(response, reverse('ledger:admin_profiles'))
+        self.assertContains(response, reverse('ledger:admin_categories'))
+        self.assertContains(response, 'Telegram checks and modules')
+        self.assertContains(response, 'Obligation category interface')
+
+    def test_admin_categories_page_lists_categories_and_links_to_edit(self):
+        category = ObligationCategory.objects.create(name='Rent')
+        self.client.force_login(get_user_model().objects.create_user(username='staff', is_staff=True))
+
+        response = self.client.get(reverse('ledger:admin_categories'))
+
+        self.assertContains(response, 'Category list')
+        self.assertContains(response, 'Rent')
+        self.assertContains(response, reverse('ledger:admin_category_create'))
+        self.assertContains(response, reverse('ledger:admin_category_update', kwargs={'pk': category.pk}))
+
+    def test_admin_category_create_and_update(self):
+        self.client.force_login(get_user_model().objects.create_user(username='staff', is_staff=True))
+
+        create_response = self.client.post(
+            reverse('ledger:admin_category_create'),
+            {
+                'name': 'Utilities',
+                'active': 'on',
+            },
+        )
+
+        self.assertRedirects(create_response, reverse('ledger:admin_categories'))
+        category = ObligationCategory.objects.get(name='Utilities')
+        self.assertTrue(category.active)
+
+        update_response = self.client.post(
+            reverse('ledger:admin_category_update', kwargs={'pk': category.pk}),
+            {
+                'name': 'Utilities updated',
+            },
+        )
+
+        self.assertRedirects(update_response, reverse('ledger:admin_categories'))
+        category.refresh_from_db()
+        self.assertEqual(category.name, 'Utilities updated')
+        self.assertFalse(category.active)
+
+    def test_admin_profiles_page_creates_missing_profiles_and_lists_modules(self):
+        self.client.force_login(get_user_model().objects.create_user(username='staff', is_staff=True))
+
+        response = self.client.get(reverse('ledger:admin_profiles'))
+
+        self.assertContains(response, 'Profile settings')
+        self.assertContains(response, self.creditor_user.username)
+        self.assertContains(response, self.borrower_user.username)
+        self.assertEqual(UserProfile.objects.filter(user=self.creditor_user).count(), 1)
+        profile = UserProfile.objects.get(user=self.borrower_user)
+        self.assertContains(response, reverse('ledger:admin_profile_update', kwargs={'pk': profile.pk}))
+        self.assertContains(response, reverse('ledger:admin_profile_check_telegram', kwargs={'pk': profile.pk}))
+        self.assertContains(response, 'Planner')
+        self.assertContains(response, 'Balance history')
+
+    def test_admin_profile_edit_updates_telegram_and_modules(self):
+        profile = UserProfile.objects.create(
+            user=self.borrower_user,
+            telegram_id=555,
+            telegram_username='old_user',
+            telegram_checked_at=timezone.now(),
+            show_planner_module=True,
+            show_dashboard_balance_history=True,
+        )
+        self.client.force_login(get_user_model().objects.create_user(username='staff', is_staff=True))
+
+        response = self.client.post(
+            reverse('ledger:admin_profile_update', kwargs={'pk': profile.pk}),
+            {
+                'telegram_id': 777,
+                'show_dashboard_balance_history': 'on',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:admin_profiles'))
+        profile.refresh_from_db()
+        self.assertEqual(profile.telegram_id, 777)
+        self.assertEqual(profile.telegram_username, '')
+        self.assertIsNone(profile.telegram_checked_at)
+        self.assertFalse(profile.show_planner_module)
+        self.assertTrue(profile.show_dashboard_balance_history)
+
+    def test_admin_profile_check_telegram_refreshes_identity(self):
+        profile = UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        self.client.force_login(get_user_model().objects.create_user(username='staff', is_staff=True))
+
+        with patch(
+            'ledger.views.get_telegram_chat_identity',
+            return_value=TelegramChatIdentity(
+                chat_id=555,
+                chat_type='private',
+                username='andrii_t',
+                first_name='Andrii',
+                last_name='Turkevych',
+            ),
+        ):
+            response = self.client.post(
+                reverse('ledger:admin_profile_check_telegram', kwargs={'pk': profile.pk}),
+                {'next': 'ledger:admin_profiles'},
+            )
+
+        self.assertRedirects(response, reverse('ledger:admin_profiles'))
+        profile.refresh_from_db()
+        self.assertEqual(profile.telegram_chat_type, 'private')
+        self.assertEqual(profile.telegram_username, 'andrii_t')
+        self.assertEqual(profile.telegram_display_name, 'Andrii Turkevych (@andrii_t)')
+        self.assertEqual(profile.telegram_lookup_error, '')
+        self.assertIsNotNone(profile.telegram_checked_at)
+
+    def test_admin_profile_check_telegram_records_errors(self):
+        profile = UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        self.client.force_login(get_user_model().objects.create_user(username='staff', is_staff=True))
+
+        with patch('ledger.views.get_telegram_chat_identity', side_effect=TelegramLookupError('Telegram failed.')):
+            response = self.client.post(
+                reverse('ledger:admin_profile_check_telegram', kwargs={'pk': profile.pk}),
+                {'next': 'ledger:admin_profile_update'},
+            )
+
+        self.assertRedirects(response, reverse('ledger:admin_profile_update', kwargs={'pk': profile.pk}))
+        profile.refresh_from_db()
+        self.assertEqual(profile.telegram_lookup_error, 'Telegram failed.')
+        self.assertIsNotNone(profile.telegram_checked_at)
 
     def test_nav_can_hide_planner_from_profile_preferences(self):
         UserProfile.objects.create(user=self.borrower_user, show_planner_module=False)

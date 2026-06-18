@@ -1,0 +1,43 @@
+{% extends "ledger/base.html" %}
+
+{% block title %}{{ title }} - TrustTrack Admin{% endblock %}
+{% block page_class %}form-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>{{ title }}</h1>
+        <div class="muted">Categories organize obligations and remain attached to historical records.</div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'ledger:admin_categories' %}">Categories</a>
+        {% if category %}
+            <a class="button secondary" href="{% url 'admin:ledger_obligationcategory_change' category.pk %}">Django admin category</a>
+        {% endif %}
+    </div>
+</div>
+
+<form class="panel form-grid" method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+        <div data-field-name="{{ field.name }}">
+            {% if field.field.widget.input_type == "checkbox" %}
+                <label>
+                    {{ field }}
+                    {{ field.label }}
+                </label>
+            {% else %}
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+            {% endif %}
+            {% if field.help_text %}<div class="muted">{{ field.help_text }}</div>{% endif %}
+            {{ field.errors }}
+        </div>
+    {% endfor %}
+    <div class="actions">
+        <button class="button" type="submit">{{ submit_label }}</button>
+        <a class="button secondary" href="{% url 'ledger:admin_categories' %}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

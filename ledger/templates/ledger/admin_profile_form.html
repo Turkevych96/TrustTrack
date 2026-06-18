@@ -1,0 +1,85 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}Edit profile - TrustTrack Admin{% endblock %}
+{% block page_class %}form-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Edit profile</h1>
+        <div class="muted">{{ profile_obj.user|user_label }}</div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'ledger:admin_profiles' %}">Profiles</a>
+        <a class="button secondary" href="{% url 'admin:ledger_userprofile_change' profile_obj.pk %}">Django admin profile</a>
+    </div>
+</div>
+
+<section class="panel setting-panel">
+    <div class="setting-head">
+        <div>
+            <h2>Telegram</h2>
+            <div class="muted">
+                {% if profile_obj.telegram_id %}
+                    {% if profile_obj.telegram_lookup_error %}Check failed{% elif profile_obj.telegram_display_name %}Verified{% else %}Configured, not checked{% endif %}
+                {% else %}
+                    Not connected
+                {% endif %}
+            </div>
+        </div>
+        <form method="post" action="{% url 'ledger:admin_profile_check_telegram' profile_obj.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="ledger:admin_profile_update">
+            <button class="button secondary" type="submit">Check Telegram</button>
+        </form>
+    </div>
+    <div class="setting-summary">
+        <div>
+            <div class="metric-label">Telegram ID</div>
+            <div class="setting-value">{% if profile_obj.telegram_id %}{{ profile_obj.telegram_id }}{% else %}<span class="muted">Not set</span>{% endif %}</div>
+        </div>
+        <div>
+            <div class="metric-label">Telegram user</div>
+            <div class="setting-value">{% if profile_obj.telegram_display_name %}{{ profile_obj.telegram_display_name }}{% else %}<span class="muted">Not verified</span>{% endif %}</div>
+        </div>
+        {% if profile_obj.telegram_chat_type %}
+            <div>
+                <div class="metric-label">Chat type</div>
+                <span class="badge">{{ profile_obj.telegram_chat_type }}</span>
+            </div>
+        {% endif %}
+        <div>
+            <div class="metric-label">Last checked</div>
+            <div>{% if profile_obj.telegram_checked_at %}{{ profile_obj.telegram_checked_at|date:"M. j, Y H:i" }}{% else %}<span class="muted">Never</span>{% endif %}</div>
+        </div>
+    </div>
+    {% if profile_obj.telegram_lookup_error %}
+        <div class="setting-note">{{ profile_obj.telegram_lookup_error }}</div>
+    {% endif %}
+</section>
+
+<form class="panel form-grid section-gap" method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+        <div data-field-name="{{ field.name }}">
+            {% if field.field.widget.input_type == "checkbox" %}
+                <label>
+                    {{ field }}
+                    {{ field.label }}
+                </label>
+            {% else %}
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+            {% endif %}
+            {% if field.help_text %}<div class="muted">{{ field.help_text }}</div>{% endif %}
+            {{ field.errors }}
+        </div>
+    {% endfor %}
+    <div class="actions">
+        <button class="button" type="submit">Save profile</button>
+        <a class="button secondary" href="{% url 'ledger:admin_profiles' %}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

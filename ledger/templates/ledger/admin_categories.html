@@ -1,0 +1,68 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}Categories - TrustTrack Admin{% endblock %}
+{% block page_class %}admin-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Categories</h1>
+        <div class="muted">Obligation categories available in TrustTrack forms.</div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'ledger:admin_panel' %}">Admin</a>
+        <a class="button secondary" href="{% url 'admin:ledger_obligationcategory_changelist' %}">Django admin categories</a>
+        <a class="button" href="{% url 'ledger:admin_category_create' %}">New category</a>
+    </div>
+</div>
+
+<section class="grid admin-metrics">
+    <div class="panel">
+        <div class="metric-label">Total categories</div>
+        <div class="metric-value">{{ categories_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Active</div>
+        <div class="metric-value positive">{{ active_categories_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Inactive</div>
+        <div class="metric-value negative">{{ inactive_categories_count }}</div>
+    </div>
+</section>
+
+<section class="section-gap">
+    <div class="section-title">
+        <h2>Category list</h2>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Obligations</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for category in categories %}
+                    <tr>
+                        <td>{{ category.name }}</td>
+                        <td>{% if category.active %}<span class="badge">Active</span>{% else %}<span class="badge">Inactive</span>{% endif %}</td>
+                        <td>{{ category.obligation_count }}</td>
+                        <td>
+                            <div class="actions">
+                                <a class="button secondary" href="{% url 'ledger:admin_category_update' category.pk %}">Edit</a>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4" class="empty">No categories yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

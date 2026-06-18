@@ -7,7 +7,7 @@ from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.password_validation import get_default_password_validators
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -15,6 +15,8 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from ledger.forms import (
+    AdminCategoryForm,
+    AdminProfileForm,
     AdminUserForm,
     CreateObligationForm,
     InterestRecalculateForm,
@@ -38,6 +40,7 @@ from ledger.models import (
     LedgerEntry,
     LedgerTransaction,
     Obligation,
+    ObligationCategory,
     UserProfile,
 )
 from ledger.services.balances import get_obligation_balance
@@ -82,6 +85,17 @@ def get_related_obligation(user, pk):
 
 def user_label(user):
     return user.get_full_name() or user.get_username()
+
+
+def _ensure_user_profiles():
+    user_model = get_user_model()
+    existing_user_ids = set(UserProfile.objects.values_list('user_id', flat=True))
+    missing_profiles = [
+        UserProfile(user=user)
+        for user in user_model.objects.exclude(pk__in=existing_user_ids)
+    ]
+    if missing_profiles:
+        UserProfile.objects.bulk_create(missing_profiles)
 
 
 def signup(request):
@@ -161,6 +175,8 @@ def admin_panel(request):
                 status=LedgerTransaction.Status.POSTED,
             ).count(),
             'financial_events_count': FinancialEvent.objects.count(),
+            'categories_count': ObligationCategory.objects.count(),
+            'active_categories_count': ObligationCategory.objects.filter(active=True).count(),
             'recent_users': recent_users,
             'recent_obligations': recent_obligations,
             'recent_transactions': recent_transactions,
@@ -209,6 +225,149 @@ def admin_user_update(request, pk):
         {
             'form': form,
             'target_user': target_user,
+        },
+    )
+
+
+@login_required
+def admin_profiles(request):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    _ensure_user_profiles()
+    profiles = UserProfile.objects.select_related('user').order_by('user__username')
+    return render(
+        request,
+        'ledger/admin_profiles.html',
+        {
+            'profiles': profiles,
+            'profiles_count': profiles.count(),
+            'telegram_profiles_count': profiles.filter(telegram_id__isnull=False).count(),
+            'telegram_error_count': profiles.exclude(telegram_lookup_error='').count(),
+            'planner_enabled_count': profiles.filter(show_planner_module=True).count(),
+            'balance_history_enabled_count': profiles.filter(show_dashboard_balance_history=True).count(),
+        },
+    )
+
+
+@login_required
+def admin_profile_update(request, pk):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    profile_obj = get_object_or_404(UserProfile.objects.select_related('user'), pk=pk)
+    old_telegram_id = profile_obj.telegram_id
+    if request.method == 'POST':
+        form = AdminProfileForm(request.POST, instance=profile_obj)
+        if form.is_valid():
+            profile_obj = form.save()
+            if profile_obj.telegram_id != old_telegram_id:
+                _clear_telegram_identity(profile_obj)
+            messages.success(request, f'Profile for {user_label(profile_obj.user)} was updated.')
+            return redirect('ledger:admin_profiles')
+    else:
+        form = AdminProfileForm(instance=profile_obj)
+
+    return render(
+        request,
+        'ledger/admin_profile_form.html',
+        {
+            'form': form,
+            'profile_obj': profile_obj,
+        },
+    )
+
+
+@login_required
+@require_POST
+def admin_profile_check_telegram(request, pk):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    profile_obj = get_object_or_404(UserProfile.objects.select_related('user'), pk=pk)
+    next_url_name = request.POST.get('next')
+    if next_url_name not in {'ledger:admin_profiles', 'ledger:admin_profile_update'}:
+        next_url_name = 'ledger:admin_profiles'
+    if not profile_obj.telegram_id:
+        _clear_telegram_identity(profile_obj)
+        messages.error(request, f'Add a Telegram ID for {user_label(profile_obj.user)} before checking.')
+        return redirect(next_url_name, pk=profile_obj.pk) if next_url_name == 'ledger:admin_profile_update' else redirect(next_url_name)
+
+    _refresh_telegram_identity(profile_obj)
+    if profile_obj.telegram_lookup_error:
+        messages.error(request, f'Telegram check failed for {user_label(profile_obj.user)}: {profile_obj.telegram_lookup_error}')
+    else:
+        display_name = profile_obj.telegram_display_name or profile_obj.telegram_id
+        messages.success(request, f'Telegram connection verified for {user_label(profile_obj.user)}: {display_name}.')
+    return redirect(next_url_name, pk=profile_obj.pk) if next_url_name == 'ledger:admin_profile_update' else redirect(next_url_name)
+
+
+@login_required
+def admin_categories(request):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    categories = ObligationCategory.objects.annotate(obligation_count=Count('obligations')).order_by('name')
+    return render(
+        request,
+        'ledger/admin_categories.html',
+        {
+            'categories': categories,
+            'categories_count': categories.count(),
+            'active_categories_count': categories.filter(active=True).count(),
+            'inactive_categories_count': categories.filter(active=False).count(),
+        },
+    )
+
+
+@login_required
+def admin_category_create(request):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    if request.method == 'POST':
+        form = AdminCategoryForm(request.POST)
+        if form.is_valid():
+            category = form.save()
+            messages.success(request, f'Category {category.name} was created.')
+            return redirect('ledger:admin_categories')
+    else:
+        form = AdminCategoryForm(initial={'active': True})
+
+    return render(
+        request,
+        'ledger/admin_category_form.html',
+        {
+            'form': form,
+            'title': 'New category',
+            'submit_label': 'Create category',
+        },
+    )
+
+
+@login_required
+def admin_category_update(request, pk):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    category = get_object_or_404(ObligationCategory, pk=pk)
+    if request.method == 'POST':
+        form = AdminCategoryForm(request.POST, instance=category)
+        if form.is_valid():
+            category = form.save()
+            messages.success(request, f'Category {category.name} was updated.')
+            return redirect('ledger:admin_categories')
+    else:
+        form = AdminCategoryForm(instance=category)
+
+    return render(
+        request,
+        'ledger/admin_category_form.html',
+        {
+            'form': form,
+            'title': f'Edit category: {category.name}',
+            'submit_label': 'Save category',
+            'category': category,
         },
     )
 

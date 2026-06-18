@@ -1,0 +1,104 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}Profiles - TrustTrack Admin{% endblock %}
+{% block page_class %}admin-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Profiles</h1>
+        <div class="muted">Telegram connectivity and per-user module visibility.</div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'ledger:admin_panel' %}">Admin</a>
+        <a class="button secondary" href="{% url 'admin:ledger_userprofile_changelist' %}">Django admin profiles</a>
+    </div>
+</div>
+
+<section class="grid admin-metrics">
+    <div class="panel">
+        <div class="metric-label">Profiles</div>
+        <div class="metric-value">{{ profiles_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Telegram IDs</div>
+        <div class="metric-value">{{ telegram_profiles_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Telegram errors</div>
+        <div class="metric-value {% if telegram_error_count %}negative{% endif %}">{{ telegram_error_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Planner enabled</div>
+        <div class="metric-value">{{ planner_enabled_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Balance history enabled</div>
+        <div class="metric-value">{{ balance_history_enabled_count }}</div>
+    </div>
+</section>
+
+<section class="section-gap">
+    <div class="section-title">
+        <h2>Profile settings</h2>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Username</th>
+                    <th>Telegram ID</th>
+                    <th>Telegram status</th>
+                    <th>Modules</th>
+                    <th>Last checked</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for profile in profiles %}
+                    <tr>
+                        <td>{{ profile.user|user_label }}</td>
+                        <td>{{ profile.user.username }}</td>
+                        <td>{% if profile.telegram_id %}{{ profile.telegram_id }}{% else %}<span class="muted">Not set</span>{% endif %}</td>
+                        <td>
+                            {% if profile.telegram_lookup_error %}
+                                <span class="badge">Error</span>
+                                <div class="setting-note">{{ profile.telegram_lookup_error }}</div>
+                            {% elif profile.telegram_id and profile.telegram_display_name %}
+                                <span class="badge">Verified</span>
+                                <div>{{ profile.telegram_display_name }}</div>
+                            {% elif profile.telegram_id %}
+                                <span class="badge">Needs check</span>
+                            {% else %}
+                                <span class="badge">Disconnected</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if profile.show_planner_module %}<span class="badge">Planner</span>{% endif %}
+                            {% if profile.show_dashboard_balance_history %}<span class="badge">Balance history</span>{% endif %}
+                            {% if not profile.show_planner_module and not profile.show_dashboard_balance_history %}
+                                <span class="muted">No modules</span>
+                            {% endif %}
+                        </td>
+                        <td>{% if profile.telegram_checked_at %}{{ profile.telegram_checked_at|date:"M. j, Y H:i" }}{% else %}<span class="muted">Never</span>{% endif %}</td>
+                        <td>
+                            <div class="actions">
+                                <a class="button secondary" href="{% url 'ledger:admin_profile_update' profile.pk %}">Edit</a>
+                                <form class="menu-form" method="post" action="{% url 'ledger:admin_profile_check_telegram' profile.pk %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="next" value="ledger:admin_profiles">
+                                    <button class="button secondary" type="submit">Check Telegram</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7" class="empty">No profiles yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
