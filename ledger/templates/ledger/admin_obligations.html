@@ -13,7 +13,6 @@
     <div class="actions">
         <a class="button secondary" href="{% url 'ledger:admin_panel' %}">Admin</a>
         <a class="button secondary" href="{% url 'admin:ledger_obligation_changelist' %}">Django admin obligations</a>
-        <a class="button" href="{% url 'ledger:obligation_create' %}">New obligation</a>
     </div>
 </div>
 
@@ -36,10 +35,10 @@
     </div>
 </section>
 
-<section class="panel section-gap">
-    <form class="actions" method="get">
-        <div>
-            <label for="id_status">Status</label>
+<section class="section-gap">
+    <form class="filter-bar" method="get">
+        <div class="filter-field filter-field-status">
+            <label class="filter-label" for="id_status">Status</label>
             <select id="id_status" name="status">
                 <option value="all"{% if status_filter == "all" %} selected{% endif %}>All</option>
                 {% for value, label in status_choices %}
@@ -47,11 +46,11 @@
                 {% endfor %}
             </select>
         </div>
-        <div>
-            <label for="id_q">Search</label>
+        <div class="filter-field filter-field-search">
+            <label class="filter-label" for="id_q">Search</label>
             <input id="id_q" name="q" type="search" value="{{ search_query }}" placeholder="Title, user, category">
         </div>
-        <div class="actions">
+        <div class="filter-actions">
             <button class="button" type="submit">Filter</button>
             <a class="button secondary" href="{% url 'ledger:admin_obligations' %}">Reset</a>
         </div>

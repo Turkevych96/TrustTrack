@@ -1453,6 +1453,8 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'Django admin')
         self.assertContains(response, reverse('ledger:admin_obligations'))
         self.assertContains(response, 'Restore or remove inaccurate history')
+        self.assertNotContains(response, reverse('ledger:obligation_create'))
+        self.assertNotContains(response, 'Low-level model maintenance')
 
     def test_admin_obligations_page_lists_internal_management_actions(self):
         post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
@@ -1470,6 +1472,8 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, reverse('admin:ledger_obligation_change', kwargs={'object_id': self.obligation.pk}))
         self.assertContains(response, reverse('ledger:admin_obligation_delete', kwargs={'pk': self.obligation.pk}))
         self.assertContains(response, f'DELETE {self.obligation.pk}')
+        self.assertContains(response, 'class="filter-bar"')
+        self.assertNotContains(response, reverse('ledger:obligation_create'))
 
     def test_admin_obligations_page_is_staff_only(self):
         self.client.force_login(self.borrower_user)

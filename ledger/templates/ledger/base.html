@@ -247,6 +247,48 @@
             color: var(--muted);
             font-size: 12px;
         }
+        .filter-bar {
+            display: flex;
+            align-items: end;
+            flex-wrap: nowrap;
+            gap: 10px;
+            width: fit-content;
+            max-width: 100%;
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+        }
+        .filter-field {
+            display: grid;
+            gap: 5px;
+        }
+        .filter-field-status {
+            width: 112px;
+        }
+        .filter-field-search {
+            width: min(300px, 100%);
+        }
+        .filter-label {
+            margin-bottom: 0;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 650;
+            text-transform: uppercase;
+        }
+        .filter-bar input,
+        .filter-bar select {
+            height: 36px;
+            padding: 7px 10px;
+        }
+        .filter-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .filter-actions .button {
+            min-height: 36px;
+        }
         .actions {
             display: flex;
             flex-wrap: wrap;
@@ -531,6 +573,12 @@
             .setting-head { align-items: stretch; flex-direction: column; }
             .setting-summary { grid-template-columns: 1fr; }
             .action-menu-panel { left: 0; right: auto; }
+            .filter-bar { align-items: stretch; }
+            .filter-bar { flex-wrap: wrap; width: 100%; }
+            .filter-field-status,
+            .filter-field-search,
+            .filter-actions { width: 100%; }
+            .filter-actions .button { flex: 1; }
             th, td { white-space: normal; }
         }
         @media (min-width: 761px) and (max-width: 1020px) {

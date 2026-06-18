@@ -12,7 +12,6 @@
     </div>
     <div class="actions">
         <a class="button secondary" href="{% url 'admin:index' %}">Django admin</a>
-        <a class="button" href="{% url 'ledger:obligation_create' %}">New obligation</a>
     </div>
 </div>
 
@@ -115,13 +114,6 @@
     <aside class="admin-side">
         <section class="panel admin-tools">
             <h2>Admin tools</h2>
-            <a class="admin-tool" href="{% url 'admin:index' %}">
-                <span>
-                    <strong>Django admin</strong>
-                    <small>Low-level model maintenance</small>
-                </span>
-                <span aria-hidden="true">&rarr;</span>
-            </a>
             <a class="admin-tool" href="{% url 'ledger:admin_users' %}">
                 <span>
                     <strong>Users</strong>
