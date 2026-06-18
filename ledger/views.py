@@ -8,6 +8,7 @@ from django.contrib.auth.password_validation import get_default_password_validat
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q
+from django.db.models.deletion import ProtectedError
 from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -35,9 +36,12 @@ from ledger.forms import (
 )
 from ledger.models import (
     EventSeries,
+    EventSeriesVersion,
+    AuditEvent,
     FinancialEvent,
     InterestAccrualRun,
     InterestRatePeriod,
+    LedgerAccount,
     LedgerEntry,
     LedgerTransaction,
     Obligation,
@@ -161,6 +165,33 @@ def _admin_user_rows(users):
             }
         )
     return rows
+
+
+def _admin_obligation_rows(obligations):
+    return [
+        {
+            'obligation': obligation,
+            'balance_units': get_obligation_balance(obligation),
+            'restore_confirmation': f'OPEN {obligation.pk}',
+            'delete_confirmation': f'DELETE {obligation.pk}',
+        }
+        for obligation in obligations
+    ]
+
+
+def _hard_delete_obligation(obligation):
+    deleted_count = 0
+    deleted_count += AuditEvent.objects.filter(obligation=obligation).delete()[0]
+    deleted_count += InterestAccrualRun.objects.filter(obligation=obligation).delete()[0]
+    deleted_count += LedgerEntry.objects.filter(transaction__obligation=obligation).delete()[0]
+    deleted_count += LedgerTransaction.objects.filter(obligation=obligation).delete()[0]
+    deleted_count += FinancialEvent.objects.filter(obligation=obligation).delete()[0]
+    deleted_count += InterestRatePeriod.objects.filter(obligation=obligation).delete()[0]
+    deleted_count += EventSeriesVersion.objects.filter(event_series__obligation=obligation).delete()[0]
+    deleted_count += EventSeries.objects.filter(obligation=obligation).delete()[0]
+    deleted_count += LedgerAccount.objects.filter(obligation=obligation).delete()[0]
+    deleted_count += Obligation.objects.filter(pk=obligation.pk).delete()[0]
+    return deleted_count
 
 
 def signup(request):
@@ -403,6 +434,114 @@ def admin_profile_check_telegram(request, pk):
         display_name = profile_obj.telegram_display_name or profile_obj.telegram_id
         messages.success(request, f'Telegram connection verified for {user_label(profile_obj.user)}: {display_name}.')
     return redirect(next_url_name, pk=profile_obj.pk) if next_url_name == 'ledger:admin_profile_update' else redirect(next_url_name)
+
+
+@login_required
+def admin_obligations(request):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    status_filter = request.GET.get('status', 'all')
+    search_query = request.GET.get('q', '').strip()
+    obligations = (
+        Obligation.objects
+        .select_related('borrower', 'creditor', 'category')
+        .annotate(
+            financial_event_count=Count('financial_events', distinct=True),
+            ledger_transaction_count=Count('ledger_transactions', distinct=True),
+            event_series_count=Count('event_series', distinct=True),
+            interest_run_count=Count('interest_accrual_runs', distinct=True),
+        )
+        .order_by('status', '-opened_on', 'title')
+    )
+    if status_filter in dict(Obligation.Status.choices):
+        obligations = obligations.filter(status=status_filter)
+    else:
+        status_filter = 'all'
+    if search_query:
+        obligations = obligations.filter(
+            Q(title__icontains=search_query)
+            | Q(borrower__username__icontains=search_query)
+            | Q(borrower__first_name__icontains=search_query)
+            | Q(borrower__last_name__icontains=search_query)
+            | Q(creditor__username__icontains=search_query)
+            | Q(creditor__first_name__icontains=search_query)
+            | Q(creditor__last_name__icontains=search_query)
+            | Q(category__name__icontains=search_query)
+        )
+
+    all_obligations = Obligation.objects.all()
+    return render(
+        request,
+        'ledger/admin_obligations.html',
+        {
+            'obligation_rows': _admin_obligation_rows(obligations),
+            'status_filter': status_filter,
+            'search_query': search_query,
+            'status_choices': Obligation.Status.choices,
+            'obligations_count': all_obligations.count(),
+            'open_obligations_count': all_obligations.filter(status=Obligation.Status.OPEN).count(),
+            'closed_obligations_count': all_obligations.filter(status=Obligation.Status.CLOSED).count(),
+            'canceled_obligations_count': all_obligations.filter(status=Obligation.Status.CANCELED).count(),
+        },
+    )
+
+
+@login_required
+@require_POST
+def admin_obligation_restore(request, pk):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    obligation = get_object_or_404(Obligation, pk=pk)
+    expected_confirmation = f'OPEN {obligation.pk}'
+    if request.POST.get('restore_confirmation') != expected_confirmation:
+        messages.error(request, f'Type "{expected_confirmation}" to restore this obligation.')
+        return redirect('ledger:admin_obligations')
+    if obligation.status == Obligation.Status.OPEN:
+        messages.info(request, f'Obligation {obligation.title} is already open.')
+        return redirect('ledger:admin_obligations')
+
+    previous_status = obligation.status
+    previous_closed_on = obligation.closed_on
+    with transaction.atomic():
+        obligation.status = Obligation.Status.OPEN
+        obligation.closed_on = None
+        obligation.save(update_fields=['status', 'closed_on', 'updated_at'])
+        AuditEvent.objects.create(
+            actor=request.user,
+            event_type='admin_obligation_restored',
+            obligation=obligation,
+            payload={
+                'previous_status': previous_status,
+                'previous_closed_on': previous_closed_on.isoformat() if previous_closed_on else None,
+            },
+        )
+    messages.success(request, f'Obligation {obligation.title} was restored. Review recurring schedules before generating future events.')
+    return redirect('ledger:admin_obligations')
+
+
+@login_required
+@require_POST
+def admin_obligation_delete(request, pk):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    obligation = get_object_or_404(Obligation, pk=pk)
+    expected_confirmation = f'DELETE {obligation.pk}'
+    if request.POST.get('delete_confirmation') != expected_confirmation:
+        messages.error(request, f'Type "{expected_confirmation}" to permanently delete this obligation.')
+        return redirect('ledger:admin_obligations')
+
+    title = obligation.title
+    try:
+        with transaction.atomic():
+            deleted_count = _hard_delete_obligation(obligation)
+    except ProtectedError as error:
+        messages.error(request, f'Obligation {title} could not be deleted because related records are protected: {error}.')
+    else:
+        messages.success(request, f'Obligation {title} and {deleted_count} related database row(s) were permanently deleted.')
+    return redirect('ledger:admin_obligations')
 
 
 @login_required

@@ -1,0 +1,206 @@
+{% extends "ledger/base.html" %}
+{% load money %}
+
+{% block title %}Obligations - TrustTrack Admin{% endblock %}
+{% block page_class %}admin-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Obligations</h1>
+        <div class="muted">Internal obligation management and repair tools.</div>
+    </div>
+    <div class="actions">
+        <a class="button secondary" href="{% url 'ledger:admin_panel' %}">Admin</a>
+        <a class="button secondary" href="{% url 'admin:ledger_obligation_changelist' %}">Django admin obligations</a>
+        <a class="button" href="{% url 'ledger:obligation_create' %}">New obligation</a>
+    </div>
+</div>
+
+<section class="grid admin-metrics">
+    <div class="panel">
+        <div class="metric-label">Total obligations</div>
+        <div class="metric-value">{{ obligations_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Open</div>
+        <div class="metric-value positive">{{ open_obligations_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Closed</div>
+        <div class="metric-value">{{ closed_obligations_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Canceled</div>
+        <div class="metric-value negative">{{ canceled_obligations_count }}</div>
+    </div>
+</section>
+
+<section class="panel section-gap">
+    <form class="actions" method="get">
+        <div>
+            <label for="id_status">Status</label>
+            <select id="id_status" name="status">
+                <option value="all"{% if status_filter == "all" %} selected{% endif %}>All</option>
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}"{% if status_filter == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="id_q">Search</label>
+            <input id="id_q" name="q" type="search" value="{{ search_query }}" placeholder="Title, user, category">
+        </div>
+        <div class="actions">
+            <button class="button" type="submit">Filter</button>
+            <a class="button secondary" href="{% url 'ledger:admin_obligations' %}">Reset</a>
+        </div>
+    </form>
+</section>
+
+<section class="section-gap">
+    <div class="section-title">
+        <h2>Obligation directory</h2>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Obligation</th>
+                    <th>Direction</th>
+                    <th>Status</th>
+                    <th>Balance</th>
+                    <th>History</th>
+                    <th>Opened</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in obligation_rows %}
+                    <tr>
+                        <td>
+                            <strong>{{ row.obligation.title }}</strong>
+                            <div class="muted">#{{ row.obligation.pk }}{% if row.obligation.category %} - {{ row.obligation.category.name }}{% endif %}</div>
+                        </td>
+                        <td>
+                            {{ row.obligation.borrower|user_label }}
+                            <div class="muted">owes {{ row.obligation.creditor|user_label }}</div>
+                        </td>
+                        <td>
+                            <span class="badge">{{ row.obligation.get_status_display }}</span>
+                            {% if row.obligation.closed_on %}
+                                <div class="muted">Closed {{ row.obligation.closed_on }}</div>
+                            {% endif %}
+                        </td>
+                        <td class="amount">{{ row.balance_units|money_units }}</td>
+                        <td>
+                            {{ row.obligation.financial_event_count }} event(s)
+                            <div class="muted">
+                                {{ row.obligation.ledger_transaction_count }} transaction(s),
+                                {{ row.obligation.event_series_count }} schedule(s),
+                                {{ row.obligation.interest_run_count }} interest run(s)
+                            </div>
+                        </td>
+                        <td>{{ row.obligation.opened_on }}</td>
+                        <td>
+                            <div class="actions">
+                                <a class="button secondary" href="{% url 'ledger:obligation_detail' row.obligation.pk %}">View</a>
+                                <a class="button secondary" href="{% url 'admin:ledger_obligation_change' row.obligation.pk %}">Django admin</a>
+                                {% if row.obligation.status != "open" %}
+                                    <button class="button secondary" type="button" data-dialog-open="restore-obligation-{{ row.obligation.pk }}">Restore</button>
+                                {% else %}
+                                    <button class="button secondary" type="button" disabled title="Open obligations do not need restoring.">Restore</button>
+                                {% endif %}
+                                <button class="button danger" type="button" data-dialog-open="delete-obligation-{{ row.obligation.pk }}">Delete</button>
+                            </div>
+
+                            {% if row.obligation.status != "open" %}
+                                <dialog class="admin-dialog" id="restore-obligation-{{ row.obligation.pk }}">
+                                    <form class="form-grid" method="post" action="{% url 'ledger:admin_obligation_restore' row.obligation.pk %}">
+                                        {% csrf_token %}
+                                        <div class="setting-head">
+                                            <div>
+                                                <h2>Restore obligation</h2>
+                                                <div class="muted">{{ row.obligation.title }} (#{{ row.obligation.pk }})</div>
+                                            </div>
+                                            <button class="link-button" type="button" data-dialog-close="restore-obligation-{{ row.obligation.pk }}">Close</button>
+                                        </div>
+                                        <div>
+                                            <label for="id_restore_confirmation_{{ row.obligation.pk }}">Confirm restore</label>
+                                            <input id="id_restore_confirmation_{{ row.obligation.pk }}" name="restore_confirmation" type="text" autocomplete="off">
+                                            <div class="muted">Type "{{ row.restore_confirmation }}" to reopen this obligation. Recurring schedules stay as they are; review them after restoring.</div>
+                                        </div>
+                                        <div class="actions">
+                                            <button class="button" type="submit">Restore obligation</button>
+                                            <button class="button secondary" type="button" data-dialog-close="restore-obligation-{{ row.obligation.pk }}">Cancel</button>
+                                        </div>
+                                    </form>
+                                </dialog>
+                            {% endif %}
+
+                            <dialog class="admin-dialog" id="delete-obligation-{{ row.obligation.pk }}">
+                                <form class="form-grid" method="post" action="{% url 'ledger:admin_obligation_delete' row.obligation.pk %}">
+                                    {% csrf_token %}
+                                    <div class="setting-head">
+                                        <div>
+                                            <h2>Delete obligation</h2>
+                                            <div class="muted">{{ row.obligation.title }} (#{{ row.obligation.pk }})</div>
+                                        </div>
+                                        <button class="link-button" type="button" data-dialog-close="delete-obligation-{{ row.obligation.pk }}">Close</button>
+                                    </div>
+                                    <div class="setting-note">
+                                        This permanently removes the obligation and its ledger history from the database.
+                                    </div>
+                                    <div>
+                                        <label for="id_delete_confirmation_{{ row.obligation.pk }}">Confirm delete</label>
+                                        <input id="id_delete_confirmation_{{ row.obligation.pk }}" name="delete_confirmation" type="text" autocomplete="off">
+                                        <div class="muted">Type "{{ row.delete_confirmation }}" to permanently delete this obligation.</div>
+                                    </div>
+                                    <div class="actions">
+                                        <button class="button danger" type="submit">Delete obligation</button>
+                                        <button class="button secondary" type="button" data-dialog-close="delete-obligation-{{ row.obligation.pk }}">Cancel</button>
+                                    </div>
+                                </form>
+                            </dialog>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7" class="empty">No obligations found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    (() => {
+        document.querySelectorAll('[data-dialog-open]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const dialog = document.getElementById(button.dataset.dialogOpen);
+                if (!dialog) return;
+                if (typeof dialog.showModal === 'function') {
+                    dialog.showModal();
+                } else {
+                    dialog.setAttribute('open', '');
+                }
+                const field = dialog.querySelector('input[type="text"]');
+                if (field) field.focus();
+            });
+        });
+
+        document.querySelectorAll('[data-dialog-close]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const dialog = document.getElementById(button.dataset.dialogClose);
+                if (!dialog) return;
+                if (typeof dialog.close === 'function') {
+                    dialog.close();
+                } else {
+                    dialog.removeAttribute('open');
+                }
+            });
+        });
+    })();
+</script>
+{% endblock %}

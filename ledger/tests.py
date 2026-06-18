@@ -1451,6 +1451,87 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, reverse('ledger:admin_users'))
         self.assertContains(response, reverse('admin:index'))
         self.assertContains(response, 'Django admin')
+        self.assertContains(response, reverse('ledger:admin_obligations'))
+        self.assertContains(response, 'Restore or remove inaccurate history')
+
+    def test_admin_obligations_page_lists_internal_management_actions(self):
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        response = self.client.get(reverse('ledger:admin_obligations'))
+
+        self.assertContains(response, 'Obligation directory')
+        self.assertContains(response, 'Test loan')
+        self.assertContains(response, 'Andrii')
+        self.assertContains(response, 'owes Alex')
+        self.assertContains(response, '$100.00')
+        self.assertContains(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        self.assertContains(response, reverse('admin:ledger_obligation_change', kwargs={'object_id': self.obligation.pk}))
+        self.assertContains(response, reverse('ledger:admin_obligation_delete', kwargs={'pk': self.obligation.pk}))
+        self.assertContains(response, f'DELETE {self.obligation.pk}')
+
+    def test_admin_obligations_page_is_staff_only(self):
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('ledger:admin_obligations'))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_obligation_restore_requires_confirmation_and_reopens(self):
+        self.obligation.status = Obligation.Status.CLOSED
+        self.obligation.closed_on = date(2026, 2, 1)
+        self.obligation.save(update_fields=['status', 'closed_on', 'updated_at'])
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        wrong_response = self.client.post(
+            reverse('ledger:admin_obligation_restore', kwargs={'pk': self.obligation.pk}),
+            {'restore_confirmation': 'OPEN wrong'},
+        )
+
+        self.assertRedirects(wrong_response, reverse('ledger:admin_obligations'))
+        self.obligation.refresh_from_db()
+        self.assertEqual(self.obligation.status, Obligation.Status.CLOSED)
+
+        response = self.client.post(
+            reverse('ledger:admin_obligation_restore', kwargs={'pk': self.obligation.pk}),
+            {'restore_confirmation': f'OPEN {self.obligation.pk}'},
+        )
+
+        self.assertRedirects(response, reverse('ledger:admin_obligations'))
+        self.obligation.refresh_from_db()
+        self.assertEqual(self.obligation.status, Obligation.Status.OPEN)
+        self.assertIsNone(self.obligation.closed_on)
+
+    def test_admin_obligation_delete_requires_confirmation_and_removes_history(self):
+        transaction = post_principal_advance(
+            self.obligation,
+            amount_units=1_000_000,
+            event_date=date(2026, 1, 1),
+        )
+        event_id = transaction.financial_event_id
+        transaction_id = transaction.pk
+        staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
+        self.client.force_login(staff_user)
+
+        wrong_response = self.client.post(
+            reverse('ledger:admin_obligation_delete', kwargs={'pk': self.obligation.pk}),
+            {'delete_confirmation': 'DELETE wrong'},
+        )
+
+        self.assertRedirects(wrong_response, reverse('ledger:admin_obligations'))
+        self.assertTrue(Obligation.objects.filter(pk=self.obligation.pk).exists())
+
+        response = self.client.post(
+            reverse('ledger:admin_obligation_delete', kwargs={'pk': self.obligation.pk}),
+            {'delete_confirmation': f'DELETE {self.obligation.pk}'},
+        )
+
+        self.assertRedirects(response, reverse('ledger:admin_obligations'))
+        self.assertFalse(Obligation.objects.filter(pk=self.obligation.pk).exists())
+        self.assertFalse(FinancialEvent.objects.filter(pk=event_id).exists())
+        self.assertFalse(LedgerTransaction.objects.filter(pk=transaction_id).exists())
 
     def test_admin_users_page_lists_users_with_profile_status_and_actions(self):
         profile = UserProfile.objects.create(

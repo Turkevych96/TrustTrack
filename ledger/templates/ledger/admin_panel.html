@@ -82,7 +82,7 @@
 
         <div class="section-title section-gap">
             <h2>Recent obligations</h2>
-            <a href="{% url 'admin:ledger_obligation_changelist' %}">Manage obligations</a>
+            <a href="{% url 'ledger:admin_obligations' %}">Manage obligations</a>
         </div>
         <div class="table-wrap">
             <table>
@@ -126,6 +126,13 @@
                 <span>
                     <strong>Users</strong>
                     <small>Accounts, Telegram, activity</small>
+                </span>
+                <span aria-hidden="true">&rarr;</span>
+            </a>
+            <a class="admin-tool" href="{% url 'ledger:admin_obligations' %}">
+                <span>
+                    <strong>Obligations</strong>
+                    <small>Restore or remove inaccurate history</small>
                 </span>
                 <span aria-hidden="true">&rarr;</span>
             </a>
