@@ -1136,6 +1136,43 @@ class BackupTests(SimpleTestCase):
         self.assertIn('--keep', started_commands[0])
         self.assertIn('4', started_commands[0])
 
+    def test_run_trusttrack_can_start_site_with_gunicorn(self):
+        started_commands = []
+
+        def remember_command(process):
+            started_commands.append(process.command)
+
+        with (
+            patch('ledger.management.commands.run_trusttrack.ManagedProcess.start', autospec=True) as start,
+            patch('ledger.management.commands.run_trusttrack.ManagedProcess.poll', autospec=True, return_value=None),
+            patch('ledger.management.commands.run_trusttrack.ManagedProcess.stop', autospec=True),
+            patch('ledger.management.commands.run_trusttrack.time.sleep', side_effect=KeyboardInterrupt),
+        ):
+            start.side_effect = remember_command
+            call_command(
+                'run_trusttrack',
+                '--no-bot',
+                '--no-scheduler',
+                '--no-backups',
+                '--site-runner',
+                'gunicorn',
+                '--host',
+                '0.0.0.0',
+                '--port',
+                '9000',
+                '--gunicorn-workers',
+                '3',
+                stdout=StringIO(),
+                stderr=StringIO(),
+            )
+
+        self.assertEqual(len(started_commands), 1)
+        self.assertIn('-m', started_commands[0])
+        self.assertIn('gunicorn', started_commands[0])
+        self.assertIn('trusttrack.wsgi:application', started_commands[0])
+        self.assertIn('0.0.0.0:9000', started_commands[0])
+        self.assertIn('3', started_commands[0])
+
     def _create_source_database(self, source_path):
         with closing(sqlite3.connect(source_path)) as connection:
             connection.execute('CREATE TABLE sample (id INTEGER PRIMARY KEY, name TEXT NOT NULL)')

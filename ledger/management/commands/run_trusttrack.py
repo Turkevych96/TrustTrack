@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+import os
 import subprocess
 import sys
 import time
@@ -42,6 +43,13 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--host', default='127.0.0.1', help='Local address for the Django site.')
         parser.add_argument('--port', type=int, default=8005, help='Local port for the Django site.')
+        parser.add_argument(
+            '--site-runner',
+            choices=['runserver', 'gunicorn'],
+            default=os.environ.get('TRUSTTRACK_SITE_RUNNER', 'runserver'),
+            help='Process used for the Django site.',
+        )
+        parser.add_argument('--gunicorn-workers', type=int, default=2, help='Gunicorn worker count.')
         parser.add_argument('--no-site', action='store_true', help='Do not start the Django development site.')
         parser.add_argument('--no-bot', action='store_true', help='Do not start the Telegram bot.')
         parser.add_argument('--no-scheduler', action='store_true', help='Do not start the due job scheduler.')
@@ -60,16 +68,11 @@ class Command(BaseCommand):
         services = []
 
         if not options['no_site']:
+            site_command = self._site_command(manage_py, options)
             services.append(
                 ManagedProcess(
                     name='site',
-                    command=[
-                        sys.executable,
-                        str(manage_py),
-                        'runserver',
-                        f'{options["host"]}:{options["port"]}',
-                        '--noreload',
-                    ],
+                    command=site_command,
                     cwd=base_dir,
                 )
             )
@@ -141,6 +144,30 @@ class Command(BaseCommand):
         finally:
             for service in reversed(services):
                 service.stop()
+
+    def _site_command(self, manage_py, options):
+        if options['site_runner'] == 'gunicorn':
+            return [
+                sys.executable,
+                '-m',
+                'gunicorn',
+                'trusttrack.wsgi:application',
+                '--bind',
+                f'{options["host"]}:{options["port"]}',
+                '--workers',
+                str(options['gunicorn_workers']),
+                '--access-logfile',
+                '-',
+                '--error-logfile',
+                '-',
+            ]
+        return [
+            sys.executable,
+            str(manage_py),
+            'runserver',
+            f'{options["host"]}:{options["port"]}',
+            '--noreload',
+        ]
 
     def _restart_service(self, service, return_code, options):
         now = time.monotonic()

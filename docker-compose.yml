@@ -1,0 +1,20 @@
+services:
+  trusttrack:
+    build:
+      context: .
+    image: trusttrack:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DJANGO_DEBUG: "False"
+      DJANGO_STATIC_ROOT: /app/staticfiles
+      TRUSTTRACK_SQLITE_PATH: /data/db.sqlite3
+      TRUSTTRACK_BACKUP_DIR: /data/backups
+    ports:
+      - "${TRUSTTRACK_BIND_IP:-127.0.0.1}:${TRUSTTRACK_PORT:-8000}:8000"
+    volumes:
+      - type: bind
+        source: ${TRUSTTRACK_DATA_DIR:-./docker-data}
+        target: /data

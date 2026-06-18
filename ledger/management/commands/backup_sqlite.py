@@ -1,4 +1,5 @@
 import time
+import os
 from pathlib import Path
 
 from django.conf import settings
@@ -42,7 +43,11 @@ class Command(BaseCommand):
 
     def _run_once(self, options):
         source_path = self._database_path(options)
-        output_dir = Path(options['output_dir']) if options['output_dir'] else Path(settings.BASE_DIR) / 'backups'
+        output_dir = Path(
+            options['output_dir']
+            or os.environ.get('TRUSTTRACK_BACKUP_DIR')
+            or Path(settings.BASE_DIR) / 'backups'
+        )
         result = create_sqlite_backup(
             source_path=source_path,
             output_dir=output_dir,

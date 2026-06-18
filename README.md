@@ -129,6 +129,23 @@ The due job scheduler runs automatically while the local stack is alive. It gene
 
 The SQLite backup scheduler also starts with the local stack. It creates dated backups in `backups/` and keeps the newest 30 by default. Backups are local-only and ignored by Git.
 
+## Run With Docker On Linux
+
+TrustTrack includes a Docker setup for a Linux server with the web app exposed only on your home LAN. Telegram access still works globally through the bot polling process. The SQLite database and backups live outside the image in a mounted host directory.
+
+Read the server guide:
+
+```text
+docs/docker-linux.md
+```
+
+Default host data layout:
+
+```text
+/opt/trusttrack/data/db.sqlite3
+/opt/trusttrack/data/backups/
+```
+
 Run due jobs manually once:
 
 ```bash
