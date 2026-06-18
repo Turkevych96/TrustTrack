@@ -19,7 +19,7 @@
 <section class="grid admin-metrics">
     <div class="panel">
         <div class="metric-label">Total users</div>
-        <div class="metric-value">{{ users|length }}</div>
+        <div class="metric-value">{{ user_rows|length }}</div>
     </div>
     <div class="panel">
         <div class="metric-label">Active</div>
@@ -33,6 +33,14 @@
         <div class="metric-label">Admins</div>
         <div class="metric-value">{{ staff_users_count }}</div>
     </div>
+    <div class="panel">
+        <div class="metric-label">Telegram IDs</div>
+        <div class="metric-value">{{ telegram_profiles_count }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Password reset ready</div>
+        <div class="metric-value">{{ telegram_ready_count }}</div>
+    </div>
 </section>
 
 <section class="section-gap">
@@ -44,26 +52,54 @@
             <thead>
                 <tr>
                     <th>User</th>
-                    <th>Username</th>
-                    <th>Email</th>
-                    <th>Status</th>
-                    <th>Joined</th>
-                    <th>Last login</th>
+                    <th>Nickname</th>
+                    <th>Telegram</th>
+                    <th>Telegram status</th>
+                    <th>Last activity</th>
+                    <th>Account</th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                {% for user in users %}
+                {% for row in user_rows %}
                     <tr>
-                        <td>{{ user|user_label }}</td>
-                        <td>{{ user.username }}</td>
-                        <td>{% if user.email %}{{ user.email }}{% else %}<span class="muted">Not set</span>{% endif %}</td>
-                        <td>{% include "ledger/partials/user_status_badges.html" with user=user %}</td>
-                        <td>{{ user.date_joined|date:"M. j, Y" }}</td>
-                        <td>{% if user.last_login %}{{ user.last_login|date:"M. j, Y H:i" }}{% else %}<span class="muted">Never</span>{% endif %}</td>
+                        <td>
+                            <strong>{{ row.user|user_label }}</strong>
+                            <div class="muted">{% if row.user.email %}{{ row.user.email }}{% else %}No email{% endif %}</div>
+                        </td>
+                        <td>{{ row.user.username }}</td>
+                        <td>
+                            {% if row.profile.telegram_display_name %}
+                                {{ row.profile.telegram_display_name }}
+                            {% elif row.profile.telegram_id %}
+                                {{ row.profile.telegram_id }}
+                            {% else %}
+                                <span class="muted">Not set</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if row.profile.telegram_lookup_error %}
+                                <span class="badge">Error</span>
+                                <div class="setting-note">{{ row.profile.telegram_lookup_error }}</div>
+                            {% elif row.profile.telegram_id and row.profile.telegram_display_name %}
+                                <span class="badge">Verified</span>
+                            {% elif row.profile.telegram_id and row.profile.telegram_checked_at %}
+                                <span class="badge">Checked</span>
+                            {% elif row.profile.telegram_id %}
+                                <span class="badge">Needs check</span>
+                            {% else %}
+                                <span class="badge">Disconnected</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ row.activity.value|date:"M. j, Y H:i" }}
+                            <div class="muted">{{ row.activity.label }}</div>
+                        </td>
+                        <td>{% include "ledger/partials/user_status_badges.html" with user=row.user %}</td>
                         <td>
                             <div class="actions">
-                                <a class="button secondary" href="{% url 'ledger:admin_user_update' user.pk %}">Edit</a>
+                                <a class="button secondary" href="{% url 'ledger:admin_user_update' row.user.pk %}">Edit user</a>
+                                <a class="button secondary" href="{% url 'ledger:admin_profile_update' row.profile.pk %}">Profile</a>
                             </div>
                         </td>
                     </tr>

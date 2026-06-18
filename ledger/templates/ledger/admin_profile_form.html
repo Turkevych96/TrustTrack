@@ -11,7 +11,7 @@
         <div class="muted">{{ profile_obj.user|user_label }}</div>
     </div>
     <div class="actions">
-        <a class="button secondary" href="{% url 'ledger:admin_profiles' %}">Profiles</a>
+        <a class="button secondary" href="{% url 'ledger:admin_users' %}">Users</a>
         <a class="button secondary" href="{% url 'admin:ledger_userprofile_change' profile_obj.pk %}">Django admin profile</a>
     </div>
 </div>
@@ -79,7 +79,7 @@
     {% endfor %}
     <div class="actions">
         <button class="button" type="submit">Save profile</button>
-        <a class="button secondary" href="{% url 'ledger:admin_profiles' %}">Cancel</a>
+        <a class="button secondary" href="{% url 'ledger:admin_users' %}">Cancel</a>
     </div>
 </form>
 {% endblock %}

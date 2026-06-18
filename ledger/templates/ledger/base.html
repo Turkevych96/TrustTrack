@@ -284,8 +284,31 @@
         .button:disabled:hover {
             background: var(--accent);
         }
+        .button.secondary:disabled:hover {
+            background: var(--panel);
+        }
         .button.danger:disabled:hover {
             background: var(--danger);
+        }
+        .admin-dialog {
+            width: min(520px, calc(100vw - 40px));
+            max-width: calc(100vw - 40px);
+            max-height: calc(100dvh - 48px);
+            overflow-x: hidden;
+            overflow-y: auto;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 16px;
+            color: var(--ink);
+            background: var(--panel);
+            box-shadow: 0 18px 48px rgba(31, 41, 51, 0.22);
+        }
+        .admin-dialog::backdrop {
+            background: rgba(31, 41, 51, 0.28);
+        }
+        .admin-dialog form,
+        .admin-dialog input {
+            min-width: 0;
         }
         .icon-button {
             width: 36px;

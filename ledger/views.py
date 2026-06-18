@@ -130,6 +130,39 @@ def _password_reset_message(user, temporary_password):
     )
 
 
+def _admin_user_activity(user, profile):
+    if user.last_login:
+        return {
+            'label': 'Last login',
+            'value': user.last_login,
+        }
+    if profile.telegram_checked_at:
+        return {
+            'label': 'Telegram checked',
+            'value': profile.telegram_checked_at,
+        }
+    return {
+        'label': 'Joined',
+        'value': user.date_joined,
+    }
+
+
+def _admin_user_rows(users):
+    rows = []
+    for user in users:
+        profile_obj, reset_ready, reset_reason = _password_reset_telegram_status(user)
+        rows.append(
+            {
+                'user': user,
+                'profile': profile_obj,
+                'activity': _admin_user_activity(user, profile_obj),
+                'password_reset_ready': reset_ready,
+                'password_reset_reason': reset_reason,
+            }
+        )
+    return rows
+
+
 def signup(request):
     if request.user.is_authenticated:
         return redirect('ledger:dashboard')
@@ -221,16 +254,25 @@ def admin_users(request):
     if not request.user.is_staff:
         return HttpResponseForbidden('Only staff users can access the admin panel.')
 
+    _ensure_user_profiles()
     user_model = get_user_model()
-    users = user_model.objects.all().order_by('username')
+    users = list(
+        user_model.objects
+        .select_related('trusttrack_profile')
+        .all()
+        .order_by('username')
+    )
+    user_rows = _admin_user_rows(users)
     return render(
         request,
         'ledger/admin_users.html',
         {
-            'users': users,
-            'active_users_count': users.filter(is_active=True).count(),
-            'staff_users_count': users.filter(is_staff=True).count(),
-            'inactive_users_count': users.filter(is_active=False).count(),
+            'user_rows': user_rows,
+            'active_users_count': sum(1 for user in users if user.is_active),
+            'staff_users_count': sum(1 for user in users if user.is_staff),
+            'inactive_users_count': sum(1 for user in users if not user.is_active),
+            'telegram_profiles_count': sum(1 for row in user_rows if row['profile'].telegram_id),
+            'telegram_ready_count': sum(1 for row in user_rows if row['password_reset_ready']),
         },
     )
 
@@ -242,7 +284,6 @@ def admin_user_update(request, pk):
 
     user_model = get_user_model()
     target_user = get_object_or_404(user_model, pk=pk)
-    password_reset_profile, password_reset_ready, password_reset_reason = _password_reset_telegram_status(target_user)
     if request.method == 'POST':
         form = AdminUserForm(request.POST, instance=target_user, actor=request.user)
         if form.is_valid():
@@ -252,15 +293,15 @@ def admin_user_update(request, pk):
     else:
         form = AdminUserForm(instance=target_user, actor=request.user)
 
+    _, reset_ready, reset_reason = _password_reset_telegram_status(target_user)
     return render(
         request,
         'ledger/admin_user_form.html',
         {
             'form': form,
             'target_user': target_user,
-            'password_reset_profile': password_reset_profile,
-            'password_reset_ready': password_reset_ready,
-            'password_reset_reason': password_reset_reason,
+            'password_reset_ready': reset_ready,
+            'password_reset_reason': reset_reason,
         },
     )
 
@@ -273,13 +314,17 @@ def admin_user_reset_password(request, pk):
 
     user_model = get_user_model()
     target_user = get_object_or_404(user_model, pk=pk)
+    next_url_name = request.POST.get('next')
+    if next_url_name not in {'ledger:admin_users', 'ledger:admin_user_update'}:
+        next_url_name = 'ledger:admin_users'
+    redirect_kwargs = {'pk': target_user.pk} if next_url_name == 'ledger:admin_user_update' else {}
     profile_obj, reset_ready, reset_reason = _password_reset_telegram_status(target_user)
     if request.POST.get('reset_confirm_username') != target_user.username:
         messages.error(request, 'Type the current username to confirm the password reset.')
-        return redirect('ledger:admin_user_update', pk=target_user.pk)
+        return redirect(next_url_name, **redirect_kwargs)
     if not reset_ready:
         messages.error(request, f'Password reset is not available: {reset_reason}')
-        return redirect('ledger:admin_user_update', pk=target_user.pk)
+        return redirect(next_url_name, **redirect_kwargs)
 
     temporary_password = _generate_temporary_password()
     try:
@@ -297,7 +342,7 @@ def admin_user_reset_password(request, pk):
             request,
             f'Telegram accepted the reset message for {target_user.username}. The password was reset.',
         )
-    return redirect('ledger:admin_user_update', pk=target_user.pk)
+    return redirect(next_url_name, **redirect_kwargs)
 
 
 @login_required
@@ -305,20 +350,7 @@ def admin_profiles(request):
     if not request.user.is_staff:
         return HttpResponseForbidden('Only staff users can access the admin panel.')
 
-    _ensure_user_profiles()
-    profiles = UserProfile.objects.select_related('user').order_by('user__username')
-    return render(
-        request,
-        'ledger/admin_profiles.html',
-        {
-            'profiles': profiles,
-            'profiles_count': profiles.count(),
-            'telegram_profiles_count': profiles.filter(telegram_id__isnull=False).count(),
-            'telegram_error_count': profiles.exclude(telegram_lookup_error='').count(),
-            'planner_enabled_count': profiles.filter(show_planner_module=True).count(),
-            'balance_history_enabled_count': profiles.filter(show_dashboard_balance_history=True).count(),
-        },
-    )
+    return redirect('ledger:admin_users')
 
 
 @login_required
@@ -335,7 +367,7 @@ def admin_profile_update(request, pk):
             if profile_obj.telegram_id != old_telegram_id:
                 _clear_telegram_identity(profile_obj)
             messages.success(request, f'Profile for {user_label(profile_obj.user)} was updated.')
-            return redirect('ledger:admin_profiles')
+            return redirect('ledger:admin_users')
     else:
         form = AdminProfileForm(instance=profile_obj)
 
@@ -357,8 +389,8 @@ def admin_profile_check_telegram(request, pk):
 
     profile_obj = get_object_or_404(UserProfile.objects.select_related('user'), pk=pk)
     next_url_name = request.POST.get('next')
-    if next_url_name not in {'ledger:admin_profiles', 'ledger:admin_profile_update'}:
-        next_url_name = 'ledger:admin_profiles'
+    if next_url_name not in {'ledger:admin_users', 'ledger:admin_profile_update'}:
+        next_url_name = 'ledger:admin_users'
     if not profile_obj.telegram_id:
         _clear_telegram_identity(profile_obj)
         messages.error(request, f'Add a Telegram ID for {user_label(profile_obj.user)} before checking.')

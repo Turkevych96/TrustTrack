@@ -1198,7 +1198,16 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, reverse('admin:index'))
         self.assertContains(response, 'Django admin')
 
-    def test_admin_users_page_lists_users_and_links_to_edit(self):
+    def test_admin_users_page_lists_users_with_profile_status_and_actions(self):
+        profile = UserProfile.objects.create(
+            user=self.borrower_user,
+            telegram_id=555,
+            telegram_chat_type='private',
+            telegram_username='andrii_t',
+            telegram_first_name='Andrii',
+            telegram_last_name='Turkevych',
+            telegram_checked_at=timezone.now(),
+        )
         staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
         self.client.force_login(staff_user)
 
@@ -1207,7 +1216,13 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'User directory')
         self.assertContains(response, self.creditor_user.username)
         self.assertContains(response, self.borrower_user.username)
+        self.assertContains(response, 'Andrii Turkevych (@andrii_t)')
+        self.assertContains(response, 'Verified')
+        self.assertContains(response, 'Joined')
+        self.assertEqual(UserProfile.objects.filter(user=self.creditor_user).count(), 1)
         self.assertContains(response, reverse('ledger:admin_user_update', kwargs={'pk': self.borrower_user.pk}))
+        self.assertContains(response, reverse('ledger:admin_profile_update', kwargs={'pk': profile.pk}))
+        self.assertNotContains(response, reverse('ledger:admin_user_reset_password', kwargs={'pk': self.borrower_user.pk}))
 
     def test_admin_user_edit_requires_confirmation(self):
         staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
@@ -1275,8 +1290,8 @@ class ViewTests(LedgerTestCase):
         self.assertTrue(staff_user.is_active)
         self.assertTrue(staff_user.is_staff)
 
-    def test_admin_user_edit_shows_telegram_password_reset_panel(self):
-        profile = UserProfile.objects.create(
+    def test_admin_user_edit_shows_telegram_password_reset_dialog_when_ready(self):
+        UserProfile.objects.create(
             user=self.borrower_user,
             telegram_id=555,
             telegram_chat_type='private',
@@ -1288,10 +1303,11 @@ class ViewTests(LedgerTestCase):
 
         response = self.client.get(reverse('ledger:admin_user_update', kwargs={'pk': self.borrower_user.pk}))
 
-        self.assertContains(response, 'Password reset via Telegram')
-        self.assertContains(response, 'Ready to send a temporary password to Telegram.')
+        self.assertContains(response, 'Reset password')
+        self.assertContains(response, f'password-reset-{self.borrower_user.pk}')
         self.assertContains(response, reverse('ledger:admin_user_reset_password', kwargs={'pk': self.borrower_user.pk}))
-        self.assertContains(response, reverse('ledger:admin_profile_update', kwargs={'pk': profile.pk}))
+        self.assertContains(response, 'name="next" value="ledger:admin_user_update"')
+        self.assertContains(response, 'Type "andrii" to generate a temporary password')
 
     def test_admin_user_password_reset_requires_confirmed_username(self):
         target_user = get_user_model().objects.create_user(username='reset_target', password='OldPass123!')
@@ -1310,7 +1326,7 @@ class ViewTests(LedgerTestCase):
                 {'reset_confirm_username': 'wrong'},
             )
 
-        self.assertRedirects(response, reverse('ledger:admin_user_update', kwargs={'pk': target_user.pk}))
+        self.assertRedirects(response, reverse('ledger:admin_users'))
         send_message.assert_not_called()
         target_user.refresh_from_db()
         self.assertTrue(target_user.check_password('OldPass123!'))
@@ -1342,8 +1358,8 @@ class ViewTests(LedgerTestCase):
                 {'reset_confirm_username': unverified_user.username},
             )
 
-        self.assertRedirects(inactive_response, reverse('ledger:admin_user_update', kwargs={'pk': inactive_user.pk}))
-        self.assertRedirects(unverified_response, reverse('ledger:admin_user_update', kwargs={'pk': unverified_user.pk}))
+        self.assertRedirects(inactive_response, reverse('ledger:admin_users'))
+        self.assertRedirects(unverified_response, reverse('ledger:admin_users'))
         send_message.assert_not_called()
         inactive_user.refresh_from_db()
         unverified_user.refresh_from_db()
@@ -1367,7 +1383,7 @@ class ViewTests(LedgerTestCase):
                 {'reset_confirm_username': target_user.username},
             )
 
-        self.assertRedirects(response, reverse('ledger:admin_user_update', kwargs={'pk': target_user.pk}))
+        self.assertRedirects(response, reverse('ledger:admin_users'))
         target_user.refresh_from_db()
         self.assertTrue(target_user.check_password('OldPass123!'))
 
@@ -1388,7 +1404,7 @@ class ViewTests(LedgerTestCase):
                 {'reset_confirm_username': target_user.username},
             )
 
-        self.assertRedirects(response, reverse('ledger:admin_user_update', kwargs={'pk': target_user.pk}))
+        self.assertRedirects(response, reverse('ledger:admin_users'))
         send_message.assert_called_once()
         chat_id, message_text = send_message.call_args.args
         temporary_password = message_text.split('Temporary password: ', 1)[1].splitlines()[0]
@@ -1398,15 +1414,16 @@ class ViewTests(LedgerTestCase):
         self.assertFalse(target_user.check_password('OldPass123!'))
         self.assertTrue(target_user.check_password(temporary_password))
 
-    def test_admin_panel_links_to_profiles_and_categories_interfaces(self):
+    def test_admin_panel_links_to_combined_users_and_categories_interfaces(self):
         staff_user = get_user_model().objects.create_user(username='staff', is_staff=True)
         self.client.force_login(staff_user)
 
         response = self.client.get(reverse('ledger:admin_panel'))
 
-        self.assertContains(response, reverse('ledger:admin_profiles'))
+        self.assertContains(response, reverse('ledger:admin_users'))
         self.assertContains(response, reverse('ledger:admin_categories'))
-        self.assertContains(response, 'Telegram checks and modules')
+        self.assertNotContains(response, reverse('ledger:admin_profiles'))
+        self.assertContains(response, 'Accounts, Telegram, activity')
         self.assertContains(response, 'Obligation category interface')
 
     def test_admin_categories_page_lists_categories_and_links_to_edit(self):
@@ -1447,20 +1464,12 @@ class ViewTests(LedgerTestCase):
         self.assertEqual(category.name, 'Utilities updated')
         self.assertFalse(category.active)
 
-    def test_admin_profiles_page_creates_missing_profiles_and_lists_modules(self):
+    def test_admin_profiles_page_redirects_to_combined_users_page(self):
         self.client.force_login(get_user_model().objects.create_user(username='staff', is_staff=True))
 
         response = self.client.get(reverse('ledger:admin_profiles'))
 
-        self.assertContains(response, 'Profile settings')
-        self.assertContains(response, self.creditor_user.username)
-        self.assertContains(response, self.borrower_user.username)
-        self.assertEqual(UserProfile.objects.filter(user=self.creditor_user).count(), 1)
-        profile = UserProfile.objects.get(user=self.borrower_user)
-        self.assertContains(response, reverse('ledger:admin_profile_update', kwargs={'pk': profile.pk}))
-        self.assertContains(response, reverse('ledger:admin_profile_check_telegram', kwargs={'pk': profile.pk}))
-        self.assertContains(response, 'Planner')
-        self.assertContains(response, 'Balance history')
+        self.assertRedirects(response, reverse('ledger:admin_users'))
 
     def test_admin_profile_edit_updates_telegram_and_modules(self):
         profile = UserProfile.objects.create(
@@ -1481,7 +1490,7 @@ class ViewTests(LedgerTestCase):
             },
         )
 
-        self.assertRedirects(response, reverse('ledger:admin_profiles'))
+        self.assertRedirects(response, reverse('ledger:admin_users'))
         profile.refresh_from_db()
         self.assertEqual(profile.telegram_id, 777)
         self.assertEqual(profile.telegram_username, '')
@@ -1505,10 +1514,10 @@ class ViewTests(LedgerTestCase):
         ):
             response = self.client.post(
                 reverse('ledger:admin_profile_check_telegram', kwargs={'pk': profile.pk}),
-                {'next': 'ledger:admin_profiles'},
+                {'next': 'ledger:admin_users'},
             )
 
-        self.assertRedirects(response, reverse('ledger:admin_profiles'))
+        self.assertRedirects(response, reverse('ledger:admin_users'))
         profile.refresh_from_db()
         self.assertEqual(profile.telegram_chat_type, 'private')
         self.assertEqual(profile.telegram_username, 'andrii_t')

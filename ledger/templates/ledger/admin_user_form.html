@@ -11,10 +11,40 @@
         <div class="muted">{{ target_user.username }}</div>
     </div>
     <div class="actions">
+        {% if password_reset_ready %}
+            <button class="button danger" type="button" data-dialog-open="password-reset-{{ target_user.pk }}">Reset password</button>
+        {% else %}
+            <button class="button secondary" type="button" disabled title="{{ password_reset_reason }}">Reset password</button>
+        {% endif %}
         <a class="button secondary" href="{% url 'ledger:admin_users' %}">Users</a>
         <a class="button secondary" href="{% url 'admin:auth_user_change' target_user.pk %}">Django admin user</a>
     </div>
 </div>
+
+{% if password_reset_ready %}
+    <dialog class="admin-dialog" id="password-reset-{{ target_user.pk }}">
+        <form class="form-grid" method="post" action="{% url 'ledger:admin_user_reset_password' target_user.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="ledger:admin_user_update">
+            <div class="setting-head">
+                <div>
+                    <h2>Reset password</h2>
+                    <div class="muted">{{ target_user.username }}</div>
+                </div>
+                <button class="link-button" type="button" data-dialog-close="password-reset-{{ target_user.pk }}">Close</button>
+            </div>
+            <div>
+                <label for="id_reset_confirm_username_{{ target_user.pk }}">Confirm username</label>
+                <input id="id_reset_confirm_username_{{ target_user.pk }}" name="reset_confirm_username" type="text" autocomplete="off">
+                <div class="muted">Type "{{ target_user.username }}" to generate a temporary password and send it to Telegram.</div>
+            </div>
+            <div class="actions">
+                <button class="button danger" type="submit">Reset password</button>
+                <button class="button secondary" type="button" data-dialog-close="password-reset-{{ target_user.pk }}">Cancel</button>
+            </div>
+        </form>
+    </dialog>
+{% endif %}
 
 <div class="panel setting-panel">
     <div class="setting-summary">
@@ -28,56 +58,6 @@
         </div>
     </div>
 </div>
-
-<section class="panel setting-panel section-gap">
-    <div class="setting-head">
-        <div>
-            <h2>Password reset via Telegram</h2>
-            <div class="muted">{{ password_reset_reason }}</div>
-        </div>
-        {% if password_reset_ready %}
-            <span class="badge">Ready</span>
-        {% else %}
-            <span class="badge">Unavailable</span>
-        {% endif %}
-    </div>
-
-    <div class="setting-summary">
-        <div>
-            <div class="metric-label">Telegram ID</div>
-            <div class="setting-value">{% if password_reset_profile.telegram_id %}{{ password_reset_profile.telegram_id }}{% else %}<span class="muted">Not set</span>{% endif %}</div>
-        </div>
-        <div>
-            <div class="metric-label">Telegram user</div>
-            <div class="setting-value">{% if password_reset_profile.telegram_display_name %}{{ password_reset_profile.telegram_display_name }}{% else %}<span class="muted">Not verified</span>{% endif %}</div>
-        </div>
-        <div>
-            <div class="metric-label">Chat type</div>
-            {% if password_reset_profile.telegram_chat_type %}
-                <span class="badge">{{ password_reset_profile.telegram_chat_type }}</span>
-            {% else %}
-                <span class="muted">Not checked</span>
-            {% endif %}
-        </div>
-        <div>
-            <div class="metric-label">Last checked</div>
-            <div>{% if password_reset_profile.telegram_checked_at %}{{ password_reset_profile.telegram_checked_at|date:"M. j, Y H:i" }}{% else %}<span class="muted">Never</span>{% endif %}</div>
-        </div>
-    </div>
-
-    <form class="form-grid" method="post" action="{% url 'ledger:admin_user_reset_password' target_user.pk %}">
-        {% csrf_token %}
-        <div>
-            <label for="id_reset_confirm_username">Confirm username</label>
-            <input id="id_reset_confirm_username" name="reset_confirm_username" type="text" autocomplete="off" {% if not password_reset_ready %}disabled{% endif %}>
-            <div class="muted">Type "{{ target_user.username }}" to generate a temporary password and send it to Telegram.</div>
-        </div>
-        <div class="actions">
-            <button class="button danger" type="submit" {% if not password_reset_ready %}disabled{% endif %}>Reset password</button>
-            <a class="button secondary" href="{% url 'ledger:admin_profile_update' password_reset_profile.pk %}">Edit profile</a>
-        </div>
-    </form>
-</section>
 
 <form class="panel form-grid section-gap" method="post">
     {% csrf_token %}
@@ -102,4 +82,36 @@
         <a class="button secondary" href="{% url 'ledger:admin_users' %}">Cancel</a>
     </div>
 </form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    (() => {
+        document.querySelectorAll('[data-dialog-open]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const dialog = document.getElementById(button.dataset.dialogOpen);
+                if (!dialog) return;
+                if (typeof dialog.showModal === 'function') {
+                    dialog.showModal();
+                } else {
+                    dialog.setAttribute('open', '');
+                }
+                const field = dialog.querySelector('input[name="reset_confirm_username"]');
+                if (field) field.focus();
+            });
+        });
+
+        document.querySelectorAll('[data-dialog-close]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const dialog = document.getElementById(button.dataset.dialogClose);
+                if (!dialog) return;
+                if (typeof dialog.close === 'function') {
+                    dialog.close();
+                } else {
+                    dialog.removeAttribute('open');
+                }
+            });
+        });
+    })();
+</script>
 {% endblock %}
