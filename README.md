@@ -127,6 +127,8 @@ The site stays local at `http://127.0.0.1:8000/`. The bot uses Telegram polling 
 
 The due job scheduler runs automatically while the local stack is alive. It generates due recurring events and posts due monthly interest without rebuilding the app. If the computer was off, the next scheduler run catches up through the current date without duplicating already generated items.
 
+The SQLite backup scheduler also starts with the local stack. It creates dated backups in `backups/` and keeps the newest 30 by default. Backups are local-only and ignored by Git.
+
 Run due jobs manually once:
 
 ```bash
@@ -139,6 +141,18 @@ Run through a specific date:
 uv run python manage.py run_due_jobs --once --date 2026-06-18
 ```
 
+Create a SQLite backup manually once:
+
+```bash
+uv run python manage.py backup_sqlite --once
+```
+
+Use a custom backup directory or retention count:
+
+```bash
+uv run python manage.py backup_sqlite --once --output-dir D:\TrustTrackBackups --keep 60
+```
+
 ## Local Development Notes
 
 - Keep `db.sqlite3` local.
@@ -147,15 +161,30 @@ uv run python manage.py run_due_jobs --once --date 2026-06-18
 - This project should stay simple and easy to run locally.
 
 ## Backup and Restore
-Because `db.sqlite3` is ignored by Git to prevent merge conflicts, you should manually backup your financial data.
+Because `db.sqlite3` is ignored by Git to prevent merge conflicts, keep backup copies of your financial data.
 
-**Create a backup:**
+The recommended local backup command creates a consistent SQLite snapshot with a timestamped filename:
+
+```bash
+uv run python manage.py backup_sqlite --once
+```
+
+The older JSON export is still useful when you want a portable text fixture:
+
 ```bash
 uv run python manage.py dumpdata > backup_data.json
 ```
-Keep ```backup_data.json``` in a safe place (this file CAN be committed to Git or saved on a flash drive).
+Keep backups in a safe place, preferably outside the project folder or copied to another drive/cloud folder.
 
-Restore from a backup (on a fresh installation):
+Restore from a SQLite backup:
+
+```powershell
+.\scripts\stop-trusttrack.ps1
+copy .\backups\trusttrack-YYYYMMDD-HHMMSS.sqlite3 .\db.sqlite3
+.\scripts\start-trusttrack.ps1
+```
+
+Restore from a JSON backup (on a fresh installation):
 ```bash
 uv run python manage.py migrate
 uv run python manage.py loaddata backup_data.json

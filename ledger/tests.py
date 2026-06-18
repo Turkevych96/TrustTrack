@@ -1,12 +1,16 @@
-from datetime import date
+from datetime import date, datetime, timezone as datetime_timezone
 from decimal import Decimal
 from io import StringIO
+from pathlib import Path
+from contextlib import closing
+import sqlite3
+import tempfile
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from django.urls import reverse
 
@@ -22,6 +26,7 @@ from ledger.models import (
     ObligationCategory,
     UserProfile,
 )
+from ledger.services.backups import create_sqlite_backup
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import ensure_obligation_accounts, post_principal_advance, post_repayment, post_scheduled_charge
 from ledger.services.due_jobs import run_due_jobs
@@ -1025,6 +1030,122 @@ class InterestTests(LedgerTestCase):
         self.assertLess(get_obligation_balance(self.obligation), old_balance)
 
 
+class BackupTests(SimpleTestCase):
+    def test_create_sqlite_backup_creates_dated_integrity_checked_copy(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            source_path = Path(temporary_directory) / 'source.sqlite3'
+            backup_dir = Path(temporary_directory) / 'backups'
+            self._create_source_database(source_path)
+
+            result = create_sqlite_backup(
+                source_path,
+                backup_dir,
+                keep=5,
+                now=datetime(2026, 6, 18, 8, 30, 0, tzinfo=datetime_timezone.utc),
+            )
+
+            self.assertEqual(result.backup_path.name, 'trusttrack-20260618-083000.sqlite3')
+            self.assertEqual(result.integrity_check, 'ok')
+            self.assertGreater(result.size_bytes, 0)
+            self.assertEqual(self._backup_names(backup_dir), ['trusttrack-20260618-083000.sqlite3'])
+            with closing(sqlite3.connect(result.backup_path)) as connection:
+                rows = connection.execute('SELECT name FROM sample ORDER BY id').fetchall()
+            self.assertEqual(rows, [('alpha',), ('beta',)])
+
+    def test_create_sqlite_backup_prunes_old_backups(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            source_path = Path(temporary_directory) / 'source.sqlite3'
+            backup_dir = Path(temporary_directory) / 'backups'
+            self._create_source_database(source_path)
+
+            create_sqlite_backup(
+                source_path,
+                backup_dir,
+                keep=2,
+                now=datetime(2026, 6, 18, 8, 30, 0, tzinfo=datetime_timezone.utc),
+            )
+            create_sqlite_backup(
+                source_path,
+                backup_dir,
+                keep=2,
+                now=datetime(2026, 6, 19, 8, 30, 0, tzinfo=datetime_timezone.utc),
+            )
+            result = create_sqlite_backup(
+                source_path,
+                backup_dir,
+                keep=2,
+                now=datetime(2026, 6, 20, 8, 30, 0, tzinfo=datetime_timezone.utc),
+            )
+
+            self.assertEqual([path.name for path in result.deleted_paths], ['trusttrack-20260618-083000.sqlite3'])
+            self.assertEqual(
+                self._backup_names(backup_dir),
+                ['trusttrack-20260619-083000.sqlite3', 'trusttrack-20260620-083000.sqlite3'],
+            )
+
+    def test_backup_sqlite_command_once_outputs_created_backup(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            source_path = Path(temporary_directory) / 'source.sqlite3'
+            backup_dir = Path(temporary_directory) / 'backups'
+            self._create_source_database(source_path)
+            output = StringIO()
+
+            call_command(
+                'backup_sqlite',
+                once=True,
+                database_path=str(source_path),
+                output_dir=str(backup_dir),
+                keep=3,
+                stdout=output,
+            )
+
+            self.assertIn('Backup created:', output.getvalue())
+            self.assertIn('integrity: ok', output.getvalue())
+            self.assertEqual(len(self._backup_names(backup_dir)), 1)
+
+    def test_run_trusttrack_can_start_backup_scheduler_process(self):
+        started_commands = []
+
+        def remember_command(process):
+            started_commands.append(process.command)
+
+        with (
+            patch('ledger.management.commands.run_trusttrack.ManagedProcess.start', autospec=True) as start,
+            patch('ledger.management.commands.run_trusttrack.ManagedProcess.poll', autospec=True, return_value=None),
+            patch('ledger.management.commands.run_trusttrack.ManagedProcess.stop', autospec=True),
+            patch('ledger.management.commands.run_trusttrack.time.sleep', side_effect=KeyboardInterrupt),
+        ):
+            start.side_effect = remember_command
+            call_command(
+                'run_trusttrack',
+                '--no-site',
+                '--no-bot',
+                '--no-scheduler',
+                '--backup-interval',
+                '11',
+                '--backup-keep',
+                '4',
+                stdout=StringIO(),
+                stderr=StringIO(),
+            )
+
+        self.assertEqual(len(started_commands), 1)
+        self.assertIn('backup_sqlite', started_commands[0])
+        self.assertIn('--interval', started_commands[0])
+        self.assertIn('11', started_commands[0])
+        self.assertIn('--keep', started_commands[0])
+        self.assertIn('4', started_commands[0])
+
+    def _create_source_database(self, source_path):
+        with closing(sqlite3.connect(source_path)) as connection:
+            connection.execute('CREATE TABLE sample (id INTEGER PRIMARY KEY, name TEXT NOT NULL)')
+            connection.executemany('INSERT INTO sample (name) VALUES (?)', [('alpha',), ('beta',)])
+            connection.commit()
+
+    def _backup_names(self, backup_dir):
+        return sorted(path.name for path in Path(backup_dir).glob('trusttrack-*.sqlite3'))
+
+
 class DueJobTests(LedgerTestCase):
     def test_run_due_jobs_generates_due_recurring_and_interest_once(self):
         post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
@@ -1105,6 +1226,7 @@ class DueJobTests(LedgerTestCase):
                 'run_trusttrack',
                 '--no-site',
                 '--no-bot',
+                '--no-backups',
                 '--scheduler-interval',
                 '7',
                 stdout=StringIO(),

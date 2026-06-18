@@ -37,7 +37,7 @@ class ManagedProcess:
 
 
 class Command(BaseCommand):
-    help = 'Run the local TrustTrack site, Telegram bot, and due job scheduler together.'
+    help = 'Run the local TrustTrack site, Telegram bot, due job scheduler, and backups together.'
 
     def add_arguments(self, parser):
         parser.add_argument('--host', default='127.0.0.1', help='Local address for the Django site.')
@@ -45,7 +45,11 @@ class Command(BaseCommand):
         parser.add_argument('--no-site', action='store_true', help='Do not start the Django development site.')
         parser.add_argument('--no-bot', action='store_true', help='Do not start the Telegram bot.')
         parser.add_argument('--no-scheduler', action='store_true', help='Do not start the due job scheduler.')
+        parser.add_argument('--no-backups', action='store_true', help='Do not start the SQLite backup scheduler.')
         parser.add_argument('--scheduler-interval', type=int, default=3600, help='Seconds between due job scheduler runs.')
+        parser.add_argument('--backup-interval', type=int, default=86400, help='Seconds between SQLite backups.')
+        parser.add_argument('--backup-keep', type=int, default=30, help='Number of newest SQLite backups to keep.')
+        parser.add_argument('--backup-dir', help='Directory for SQLite backups. Defaults to BASE_DIR/backups.')
         parser.add_argument('--restart-delay', type=float, default=5.0, help='Seconds to wait before restarting a crashed child process.')
         parser.add_argument('--max-restarts', type=int, default=5, help='Maximum restarts inside the restart window.')
         parser.add_argument('--restart-window', type=float, default=60.0, help='Restart window in seconds.')
@@ -94,8 +98,28 @@ class Command(BaseCommand):
                 )
             )
 
+        if not options['no_backups']:
+            command = [
+                sys.executable,
+                str(manage_py),
+                'backup_sqlite',
+                '--interval',
+                str(options['backup_interval']),
+                '--keep',
+                str(options['backup_keep']),
+            ]
+            if options['backup_dir']:
+                command.extend(['--output-dir', options['backup_dir']])
+            services.append(
+                ManagedProcess(
+                    name='SQLite backup scheduler',
+                    command=command,
+                    cwd=base_dir,
+                )
+            )
+
         if not services:
-            raise CommandError('Nothing to run. Remove --no-site, --no-bot, or --no-scheduler.')
+            raise CommandError('Nothing to run. Remove --no-site, --no-bot, --no-scheduler, or --no-backups.')
 
         for service in services:
             self.stdout.write(f'Starting {service.name}...')
