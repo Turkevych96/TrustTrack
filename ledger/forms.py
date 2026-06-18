@@ -149,6 +149,39 @@ class AdminProfileForm(forms.ModelForm):
         self.fields['telegram_id'].min_value = 1
 
 
+class AdminProfileTelegramForm(forms.ModelForm):
+    class Meta:
+        model = UserProfile
+        fields = ('telegram_id',)
+        labels = {
+            'telegram_id': 'Telegram ID',
+        }
+        help_texts = {
+            'telegram_id': 'Leave blank to disconnect Telegram for this profile.',
+        }
+        widgets = {
+            'telegram_id': forms.NumberInput(attrs={'min': '1', 'step': '1'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['telegram_id'].min_value = 1
+
+
+class AdminProfileModulesForm(forms.ModelForm):
+    class Meta:
+        model = UserProfile
+        fields = ('show_planner_module', 'show_dashboard_balance_history')
+        labels = {
+            'show_planner_module': 'Planner',
+            'show_dashboard_balance_history': 'Dashboard balance history',
+        }
+        help_texts = {
+            'show_planner_module': 'Show Planner in this user navigation bar.',
+            'show_dashboard_balance_history': 'Show the Balance history chart on this user dashboard.',
+        }
+
+
 class AdminCategoryForm(forms.ModelForm):
     class Meta:
         model = ObligationCategory

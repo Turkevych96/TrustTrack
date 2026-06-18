@@ -19,6 +19,8 @@ from django.views.decorators.http import require_POST
 from ledger.forms import (
     AdminCategoryForm,
     AdminProfileForm,
+    AdminProfileModulesForm,
+    AdminProfileTelegramForm,
     AdminUserForm,
     CreateObligationForm,
     InterestRecalculateForm,
@@ -391,23 +393,43 @@ def admin_profile_update(request, pk):
 
     profile_obj = get_object_or_404(UserProfile.objects.select_related('user'), pk=pk)
     old_telegram_id = profile_obj.telegram_id
+    telegram_form = AdminProfileTelegramForm(instance=profile_obj)
+    module_preferences_form = AdminProfileModulesForm(instance=profile_obj)
+    show_telegram_form = not profile_obj.telegram_id
+
     if request.method == 'POST':
-        form = AdminProfileForm(request.POST, instance=profile_obj)
-        if form.is_valid():
-            profile_obj = form.save()
-            if profile_obj.telegram_id != old_telegram_id:
-                _clear_telegram_identity(profile_obj)
-            messages.success(request, f'Profile for {user_label(profile_obj.user)} was updated.')
-            return redirect('ledger:admin_users')
-    else:
-        form = AdminProfileForm(instance=profile_obj)
+        if 'telegram_submit' in request.POST:
+            show_telegram_form = True
+            telegram_form = AdminProfileTelegramForm(request.POST, instance=profile_obj)
+            if telegram_form.is_valid():
+                profile_obj = telegram_form.save()
+                if profile_obj.telegram_id != old_telegram_id:
+                    _clear_telegram_identity(profile_obj)
+                messages.success(request, f'Telegram settings for {user_label(profile_obj.user)} were updated.')
+                return redirect('ledger:admin_users')
+        elif 'modules_submit' in request.POST:
+            module_preferences_form = AdminProfileModulesForm(request.POST, instance=profile_obj)
+            if module_preferences_form.is_valid():
+                module_preferences_form.save()
+                messages.success(request, f'Module settings for {user_label(profile_obj.user)} were updated.')
+                return redirect('ledger:admin_users')
+        else:
+            form = AdminProfileForm(request.POST, instance=profile_obj)
+            if form.is_valid():
+                profile_obj = form.save()
+                if profile_obj.telegram_id != old_telegram_id:
+                    _clear_telegram_identity(profile_obj)
+                messages.success(request, f'Profile for {user_label(profile_obj.user)} was updated.')
+                return redirect('ledger:admin_users')
 
     return render(
         request,
         'ledger/admin_profile_form.html',
         {
-            'form': form,
+            'telegram_form': telegram_form,
+            'module_preferences_form': module_preferences_form,
             'profile_obj': profile_obj,
+            'show_telegram_form': show_telegram_form,
         },
     )
 

@@ -1810,14 +1810,14 @@ class ViewTests(LedgerTestCase):
 
         self.assertRedirects(response, reverse('ledger:admin_users'))
 
-    def test_admin_profile_edit_updates_telegram_and_modules(self):
+    def test_admin_profile_edit_updates_telegram_without_changing_modules(self):
         profile = UserProfile.objects.create(
             user=self.borrower_user,
             telegram_id=555,
             telegram_username='old_user',
             telegram_checked_at=timezone.now(),
             show_planner_module=True,
-            show_dashboard_balance_history=True,
+            show_dashboard_balance_history=False,
         )
         self.client.force_login(get_user_model().objects.create_user(username='staff', is_staff=True))
 
@@ -1825,7 +1825,7 @@ class ViewTests(LedgerTestCase):
             reverse('ledger:admin_profile_update', kwargs={'pk': profile.pk}),
             {
                 'telegram_id': 777,
-                'show_dashboard_balance_history': 'on',
+                'telegram_submit': '1',
             },
         )
 
@@ -1834,8 +1834,57 @@ class ViewTests(LedgerTestCase):
         self.assertEqual(profile.telegram_id, 777)
         self.assertEqual(profile.telegram_username, '')
         self.assertIsNone(profile.telegram_checked_at)
+        self.assertTrue(profile.show_planner_module)
+        self.assertFalse(profile.show_dashboard_balance_history)
+
+    def test_admin_profile_edit_updates_modules_without_changing_telegram(self):
+        profile = UserProfile.objects.create(
+            user=self.borrower_user,
+            telegram_id=555,
+            telegram_username='old_user',
+            telegram_checked_at=timezone.now(),
+            show_planner_module=True,
+            show_dashboard_balance_history=False,
+        )
+        self.client.force_login(get_user_model().objects.create_user(username='staff', is_staff=True))
+
+        response = self.client.post(
+            reverse('ledger:admin_profile_update', kwargs={'pk': profile.pk}),
+            {
+                'show_dashboard_balance_history': 'on',
+                'modules_submit': '1',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:admin_users'))
+        profile.refresh_from_db()
+        self.assertEqual(profile.telegram_id, 555)
+        self.assertEqual(profile.telegram_username, 'old_user')
+        self.assertIsNotNone(profile.telegram_checked_at)
         self.assertFalse(profile.show_planner_module)
         self.assertTrue(profile.show_dashboard_balance_history)
+
+    def test_admin_profile_edit_hides_telegram_id_until_change(self):
+        profile = UserProfile.objects.create(
+            user=self.borrower_user,
+            telegram_id=555,
+            show_planner_module=True,
+        )
+        self.client.force_login(get_user_model().objects.create_user(username='staff', is_staff=True))
+
+        response = self.client.get(reverse('ledger:admin_profile_update', kwargs={'pk': profile.pk}))
+
+        self.assertContains(response, 'data-edit-target="admin-telegram-form"')
+        self.assertContains(
+            response,
+            '<form id="admin-telegram-form" class="form-grid setting-edit" method="post" hidden>',
+        )
+        self.assertContains(response, 'data-field-name="telegram_id"')
+        self.assertContains(response, 'id="modules-panel"')
+        self.assertContains(response, 'data-field-name="show_planner_module"')
+        self.assertContains(response, 'Planner')
+        content = response.content.decode()
+        self.assertLess(content.index('data-field-name="telegram_id"'), content.index('id="modules-panel"'))
 
     def test_admin_profile_check_telegram_refreshes_identity(self):
         profile = UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
