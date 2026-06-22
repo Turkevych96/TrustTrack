@@ -7,7 +7,7 @@ from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.password_validation import get_default_password_validators
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum
 from django.db.models.deletion import ProtectedError
 from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -861,6 +861,7 @@ def obligation_detail(request, pk):
         'event_series_rows': [_event_series_row(series) for series in event_series],
         'interest_rates': InterestRatePeriod.objects.filter(obligation=obligation).order_by('-effective_from'),
     }
+    context['obligation_summary'] = _obligation_summary(obligation, context['balance_units'])
     return render(request, 'ledger/obligation_detail.html', context)
 
 
@@ -1286,6 +1287,41 @@ def _event_series_row(series):
         'current_amount_units': version.amount_units if version else None,
         'schedule_label': _event_series_schedule_label(series),
     }
+
+
+def _obligation_summary(obligation, balance_units):
+    active_events = FinancialEvent.objects.filter(obligation=obligation, voided_at__isnull=True)
+    paid_to_date_units = _sum_event_units(
+        active_events.filter(event_type=FinancialEvent.EventType.REPAYMENT)
+    )
+    principal_charges_units = _sum_event_units(
+        active_events.filter(
+            event_type__in=[
+                FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+                FinancialEvent.EventType.SCHEDULED_CHARGE,
+            ]
+        )
+    )
+    interest_accrued_units = (
+        InterestAccrualRun.objects.filter(
+            obligation=obligation,
+            status=InterestAccrualRun.Status.POSTED,
+        )
+        .aggregate(total=Sum('calculated_interest_amount_units'))
+        .get('total')
+        or 0
+    )
+
+    return {
+        'paid_to_date_units': paid_to_date_units,
+        'principal_charges_units': principal_charges_units,
+        'interest_accrued_units': interest_accrued_units,
+        'has_interest': interest_accrued_units > 0 or obligation.interest_rate_periods.exists(),
+    }
+
+
+def _sum_event_units(events):
+    return events.aggregate(total=Sum('amount_units')).get('total') or 0
 
 
 def _manual_transfer_events(obligation):

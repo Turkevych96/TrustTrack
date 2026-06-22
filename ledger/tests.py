@@ -2267,6 +2267,31 @@ class ViewTests(LedgerTestCase):
             reverse('ledger:manual_transfer_update', kwargs={'pk': self.obligation.pk, 'event_pk': advance.pk}),
         )
 
+    def test_obligation_detail_shows_financial_summary_totals(self):
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('12.0000'),
+            effective_from=date(2026, 1, 1),
+        )
+        interest_run = post_monthly_interest(self.obligation, date(2026, 1, 1))
+        post_repayment(self.obligation, amount_units=250_000, event_date=date(2026, 2, 2))
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+
+        summary = response.context['obligation_summary']
+        self.assertEqual(summary['paid_to_date_units'], 250_000)
+        self.assertEqual(summary['principal_charges_units'], 1_000_000)
+        self.assertEqual(summary['interest_accrued_units'], interest_run.calculated_interest_amount_units)
+        self.assertContains(response, 'Paid to date')
+        self.assertContains(response, '$25.00')
+        self.assertContains(response, 'Principal/charges')
+        self.assertContains(response, '$100.00')
+        self.assertContains(response, 'Interest accrued')
+        self.assertContains(response, '$0.95')
+        self.assertNotContains(response, 'Paid progress')
+
     def test_manual_transfer_edit_reverses_original_and_posts_replacement(self):
         original = post_principal_advance(
             self.obligation,

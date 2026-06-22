@@ -46,6 +46,20 @@
         <div class="metric-value">{{ balance_units|money_units }}</div>
     </div>
     <div class="panel">
+        <div class="metric-label">Paid to date</div>
+        <div class="metric-value">{{ obligation_summary.paid_to_date_units|money_units }}</div>
+    </div>
+    <div class="panel">
+        <div class="metric-label">Principal/charges</div>
+        <div class="metric-value">{{ obligation_summary.principal_charges_units|money_units }}</div>
+    </div>
+    {% if obligation_summary.has_interest %}
+        <div class="panel">
+            <div class="metric-label">Interest accrued</div>
+            <div class="metric-value">{{ obligation_summary.interest_accrued_units|money_units }}</div>
+        </div>
+    {% endif %}
+    <div class="panel">
         <div class="metric-label">Your role</div>
         <div class="metric-value">{{ role }}</div>
     </div>
@@ -132,7 +146,7 @@
             <table>
                 <thead>
                     <tr>
-                        <th>Rate</th>
+                        <th>APY</th>
                         <th>From</th>
                         <th>To</th>
                         {% if obligation.status == "open" %}<th></th>{% endif %}
