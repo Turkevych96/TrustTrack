@@ -6,7 +6,7 @@ from django.utils import timezone
 from ledger.models import Obligation
 from ledger.services.balances import get_obligation_balance
 from ledger.services.interest import generate_due_interest
-from ledger.services.notifications import send_due_job_notifications
+from ledger.services.notifications import build_due_job_notification_item, send_due_job_notifications
 from ledger.services.recurring import generate_due_recurring_events
 
 
@@ -28,6 +28,7 @@ class DueJobResult:
     recurring_created: int = 0
     interest_posted: int = 0
     notifications_sent: int = 0
+    notification_errors: list[str] = field(default_factory=list)
     obligation_results: list[DueJobObligationResult] = field(default_factory=list)
 
     @property
@@ -36,13 +37,14 @@ class DueJobResult:
 
     @property
     def notification_error_count(self):
-        return sum(len(item.notification_errors) for item in self.obligation_results)
+        return len(self.notification_errors) + sum(len(item.notification_errors) for item in self.obligation_results)
 
 
 def run_due_jobs(through_date=None):
     through_date = through_date or timezone.localdate()
     result = DueJobResult(through_date=through_date)
     obligations = Obligation.objects.filter(status=Obligation.Status.OPEN).order_by('id')
+    notification_items = []
 
     for obligation in obligations:
         result.obligation_count += 1
@@ -78,18 +80,21 @@ def run_due_jobs(through_date=None):
 
         balance_after_units = get_obligation_balance(obligation)
         if balance_after_units != balance_before_units and (created_transactions or posted_runs):
-            notification_result = send_due_job_notifications(
+            notification_item = build_due_job_notification_item(
                 obligation,
                 balance_before_units,
                 balance_after_units,
                 created_transactions,
                 posted_runs,
             )
-            obligation_result.notifications_sent = notification_result.sent
-            obligation_result.notification_errors.extend(notification_result.errors)
-            result.notifications_sent += notification_result.sent
+            if notification_item is not None:
+                notification_items.append(notification_item)
 
         result.obligation_results.append(obligation_result)
+
+    notification_result = send_due_job_notifications(notification_items)
+    result.notifications_sent = notification_result.sent
+    result.notification_errors.extend(notification_result.errors)
 
     return result
 

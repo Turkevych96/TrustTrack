@@ -36,6 +36,7 @@ from ledger.services.interest import (
     post_monthly_interest,
     recalculate_interest_from,
 )
+from ledger.services.notifications import DueJobNotificationItem, build_due_job_notification_messages
 from ledger.services.planner import build_portfolio_projection, simulate_monthly_payment
 from ledger.services.recurring import (
     generate_due_recurring_events,
@@ -1254,22 +1255,43 @@ class DueJobTests(LedgerTestCase):
             amount_units=1_000_000,
             valid_from=date(2026, 1, 1),
         )
+        second_obligation = Obligation.objects.create(
+            creditor=self.creditor_user,
+            borrower=self.borrower_user,
+            title='Utilities',
+            opened_on=date(2026, 1, 1),
+        )
+        second_series = EventSeries.objects.create(
+            obligation=second_obligation,
+            name='Utilities',
+            day_of_month=1,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=second_series,
+            amount_units=500_000,
+            valid_from=date(2026, 1, 1),
+        )
 
         with patch('ledger.services.notifications.send_telegram_message', return_value={'message_id': 1}) as send:
             first_result = run_due_jobs(through_date=date(2026, 1, 1))
             second_result = run_due_jobs(through_date=date(2026, 1, 1))
 
-        self.assertEqual(first_result.recurring_created, 1)
+        self.assertEqual(first_result.recurring_created, 2)
         self.assertEqual(first_result.notifications_sent, 2)
         self.assertEqual(second_result.notifications_sent, 0)
         self.assertEqual(send.call_count, 2)
         self.assertEqual({call.args[0] for call in send.call_args_list}, {111, 222})
         message_text = send.call_args_list[0].args[1]
-        self.assertIn('TrustTrack balance update', message_text)
+        self.assertIn('TrustTrack balance updates', message_text)
+        self.assertIn('2 obligation(s) changed', message_text)
+        self.assertIn('Total change: +$150.00', message_text)
         self.assertIn('Test loan', message_text)
-        self.assertIn('Balance changed: $0.00 -> $100.00', message_text)
-        self.assertIn('Scheduled amount: +$100.00', message_text)
-        self.assertIn('Interest amount: +$0.00', message_text)
+        self.assertIn('Balance: $0.00 -> $100.00', message_text)
+        self.assertIn('Scheduled: +$100.00', message_text)
+        self.assertIn('Utilities', message_text)
+        self.assertIn('Balance: $0.00 -> $50.00', message_text)
+        self.assertIn('Scheduled: +$50.00', message_text)
         self.assertIn('/settings', message_text)
 
     def test_run_due_jobs_respects_telegram_notification_opt_out(self):
@@ -1313,9 +1335,36 @@ class DueJobTests(LedgerTestCase):
 
         self.assertEqual(result.interest_posted, 1)
         message_text = send.call_args.args[1]
-        self.assertIn('Scheduled amount: +$0.00', message_text)
-        self.assertIn('Interest amount: +$0.95', message_text)
+        self.assertNotIn('Scheduled:', message_text)
+        self.assertIn('Interest: +$0.95', message_text)
         self.assertIn('Change: +$0.95', message_text)
+
+    def test_due_job_notification_digest_splits_long_messages(self):
+        profile = UserProfile.objects.create(user=self.borrower_user, telegram_id=222)
+        items = []
+        for index in range(4):
+            obligation = Obligation.objects.create(
+                creditor=self.creditor_user,
+                borrower=self.borrower_user,
+                title=f'Long notification loan {index}',
+                opened_on=date(2026, 1, 1),
+            )
+            items.append(
+                DueJobNotificationItem(
+                    obligation=obligation,
+                    balance_before_units=0,
+                    balance_after_units=1_000_000,
+                    recurring_change_units=1_000_000,
+                    interest_units=0,
+                )
+            )
+
+        messages = build_due_job_notification_messages(profile, items, max_message_length=260)
+
+        self.assertGreater(len(messages), 1)
+        self.assertIn('TrustTrack balance updates (1/', messages[0])
+        self.assertIn('Long notification loan 0', messages[0])
+        self.assertIn('/settings', messages[-1])
 
     def test_run_due_jobs_generates_due_recurring_and_interest_once(self):
         post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))

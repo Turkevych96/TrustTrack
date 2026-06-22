@@ -59,3 +59,5 @@ class Command(BaseCommand):
                 self.stderr.write(
                     f'Obligation #{obligation_result.obligation_id} ({obligation_result.title}) notification: {error}'
                 )
+        for error in result.notification_errors:
+            self.stderr.write(f'Notification: {error}')
