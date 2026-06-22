@@ -477,6 +477,29 @@
             margin-bottom: 0;
             font-weight: 600;
         }
+        .choice-card-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .choice-card {
+            display: inline-flex;
+            gap: 8px;
+            min-height: 48px;
+            align-items: flex-start;
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            padding: 10px 12px;
+            background: #fbfcfb;
+            margin-bottom: 0;
+        }
+        .choice-card > span {
+            display: grid;
+            gap: 2px;
+        }
+        .choice-card .muted {
+            font-weight: 500;
+        }
         [data-field-name="has_interest"] {
             display: flex;
             align-items: center;
@@ -578,6 +601,7 @@
             .nav, .page-title { flex-direction: column; align-items: stretch; }
             .nav-links, .nav-user { flex-wrap: wrap; }
             .metrics, .admin-metrics, .admin-layout, .two-col, .settings-grid, .main-side, .simulator-grid { grid-template-columns: 1fr; }
+            .choice-card-grid { grid-template-columns: 1fr; }
             .setting-head { align-items: stretch; flex-direction: column; }
             .setting-summary { grid-template-columns: 1fr; }
             .action-menu-panel { left: 0; right: auto; }

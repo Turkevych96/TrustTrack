@@ -27,7 +27,8 @@ from ledger.services.recalculation import recalculate_obligation
 
 
 QUICK_REPAYMENT_AMOUNTS = (Decimal('25'), Decimal('50'), Decimal('100'))
-PENDING_REPAYMENT_OBLIGATIONS = {}
+PENDING_MANUAL_TRANSFERS = {}
+PENDING_REPAYMENT_OBLIGATIONS = PENDING_MANUAL_TRANSFERS
 PENDING_OBLIGATION_CREATIONS = {}
 DAY_NAMES = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
 ROLE_LENT = 'lent'
@@ -73,8 +74,8 @@ TELEGRAM_TEXT = {
         LANG_RU: 'Доступ к TrustTrack подтверждён для {user}.',
     },
     'help_buttons': {
-        LANG_EN: 'Use the buttons below to check balance, open an obligation, or record a repayment.',
-        LANG_RU: 'Используйте кнопки ниже, чтобы проверить баланс, открыть обязательство или внести погашение.',
+        LANG_EN: 'Use the buttons below to check balance, open an obligation, or record a manual transfer.',
+        LANG_RU: 'Используйте кнопки ниже, чтобы проверить баланс, открыть обязательство или внести ручную операцию.',
     },
     'balance_title': {LANG_EN: 'TrustTrack balance', LANG_RU: 'Баланс TrustTrack'},
     'no_transactions': {LANG_EN: 'No transactions yet.', LANG_RU: 'Операций пока нет.'},
@@ -158,8 +159,8 @@ TELEGRAM_TEXT = {
     'borrower': {LANG_EN: 'borrower', LANG_RU: 'заёмщик'},
     'creditor': {LANG_EN: 'creditor', LANG_RU: 'кредитор'},
     'use_repayment_button': {
-        LANG_EN: 'Use the repayment button below.',
-        LANG_RU: 'Используйте кнопку погашения ниже.',
+        LANG_EN: 'Use the manual transfer button below.',
+        LANG_RU: 'Используйте кнопку ручной операции ниже.',
     },
     'repayment_parse_error': {
         LANG_EN: 'Could not parse repayment command. Use /start and choose repayment from the buttons.',
@@ -178,12 +179,12 @@ TELEGRAM_TEXT = {
         LANG_RU: 'Дата погашения не может быть в будущем.',
     },
     'amount_number_error': {
-        LANG_EN: 'Repayment amount must be a number.',
-        LANG_RU: 'Сумма погашения должна быть числом.',
+        LANG_EN: 'Amount must be a number.',
+        LANG_RU: 'Сумма должна быть числом.',
     },
     'amount_positive_error': {
-        LANG_EN: 'Repayment amount must be greater than zero.',
-        LANG_RU: 'Сумма погашения должна быть больше нуля.',
+        LANG_EN: 'Amount must be greater than zero.',
+        LANG_RU: 'Сумма должна быть больше нуля.',
     },
     'amount_example': {
         LANG_EN: 'Send only the amount, for example: 37.50 or 37,50',
@@ -194,9 +195,24 @@ TELEGRAM_TEXT = {
         LANG_RU: 'Погашение не может превышать баланс на {date}.\nБаланс: {balance}',
     },
     'confirm_repayment': {LANG_EN: 'Confirm repayment', LANG_RU: 'Подтвердить погашение'},
+    'confirm_debt_increase': {
+        LANG_EN: 'Confirm debt increase',
+        LANG_RU: 'Подтвердить увеличение долга',
+    },
     'obligation': {LANG_EN: 'Obligation', LANG_RU: 'Обязательство'},
+    'action': {LANG_EN: 'Action', LANG_RU: 'Действие'},
     'amount': {LANG_EN: 'Amount', LANG_RU: 'Сумма'},
     'date': {LANG_EN: 'Date', LANG_RU: 'Дата'},
+    'manual_transfer': {LANG_EN: 'Manual transfer', LANG_RU: 'Ручная операция'},
+    'choose_transfer_action': {
+        LANG_EN: 'What do you want to record?',
+        LANG_RU: 'Что нужно записать?',
+    },
+    'transfer_repayment': {LANG_EN: 'Repayment', LANG_RU: 'Погашение'},
+    'transfer_debt_increase': {
+        LANG_EN: 'Debt increase',
+        LANG_RU: 'Увеличение долга',
+    },
     'record_repayment': {
         LANG_EN: 'Record repayment for {title}',
         LANG_RU: 'Внести погашение для {title}',
@@ -205,6 +221,10 @@ TELEGRAM_TEXT = {
     'custom_repayment': {
         LANG_EN: 'Custom repayment for {title}',
         LANG_RU: 'Своя сумма погашения для {title}',
+    },
+    'custom_debt_increase': {
+        LANG_EN: 'Debt increase for {title}',
+        LANG_RU: 'Увеличение долга для {title}',
     },
     'no_balance_to_repay': {
         LANG_EN: '{title} has no balance to repay.',
@@ -223,6 +243,14 @@ TELEGRAM_TEXT = {
         LANG_RU: 'Погашение уже было записано.',
     },
     'repayment_recorded': {LANG_EN: 'Repayment recorded.', LANG_RU: 'Погашение записано.'},
+    'debt_increase_already_recorded': {
+        LANG_EN: 'Debt increase was already recorded.',
+        LANG_RU: 'Увеличение долга уже было записано.',
+    },
+    'debt_increase_recorded': {
+        LANG_EN: 'Debt increase recorded.',
+        LANG_RU: 'Увеличение долга записано.',
+    },
     'new_obligation': {LANG_EN: 'New obligation', LANG_RU: 'Новое обязательство'},
     'new_obligation_cancelled': {
         LANG_EN: 'New obligation was cancelled.',
@@ -342,7 +370,7 @@ TELEGRAM_TEXT = {
     },
     'custom_amount': {LANG_EN: 'Custom amount', LANG_RU: 'Своя сумма'},
     'back': {LANG_EN: 'Back', LANG_RU: 'Назад'},
-    'add_repayment': {LANG_EN: 'Add repayment', LANG_RU: 'Добавить погашение'},
+    'add_manual_transfer': {LANG_EN: 'Manual transfer', LANG_RU: 'Ручная операция'},
     'back_to_obligations': {
         LANG_EN: 'Back to obligations',
         LANG_RU: 'Назад к обязательствам',
@@ -434,7 +462,7 @@ def _process_message(message, today, nonce_factory):
             lang,
         )
 
-    if not text.startswith('/') and telegram_user_id in PENDING_REPAYMENT_OBLIGATIONS:
+    if not text.startswith('/') and telegram_user_id in PENDING_MANUAL_TRANSFERS:
         return _pending_repayment_preview(
             profile.user,
             telegram_user_id,
@@ -618,6 +646,34 @@ def _process_callback_query(callback_query, today, nonce_factory):
             callback_query_id=callback_query_id,
             callback_text=_t(lang, 'obligation'),
         )
+    if data.startswith('transfermenu:'):
+        text, reply_markup = _manual_transfer_menu_callback_response(profile.user, data, lang)
+        return TelegramBotResult(
+            messages=[_panel_message(chat_id, message_id, text, reply_markup)],
+            callback_query_id=callback_query_id,
+            callback_text=_t(lang, 'manual_transfer'),
+        )
+    if data.startswith('transfer:repayment:'):
+        text, reply_markup = _manual_transfer_repayment_callback_response(profile.user, data, today, lang)
+        return TelegramBotResult(
+            messages=[_panel_message(chat_id, message_id, text, reply_markup)],
+            callback_query_id=callback_query_id,
+            callback_text=_t(lang, 'event_repayment'),
+        )
+    if data.startswith('transfer:advance:'):
+        text, reply_markup = _custom_debt_increase_callback_response(
+            profile.user,
+            telegram_user_id,
+            data,
+            chat_id,
+            message_id,
+            lang,
+        )
+        return TelegramBotResult(
+            messages=[_panel_message(chat_id, message_id, text, reply_markup)],
+            callback_query_id=callback_query_id,
+            callback_text=_t(lang, 'transfer_debt_increase'),
+        )
     if data.startswith('repaymenu:'):
         text, reply_markup = _repayment_menu_callback_response(profile.user, data, today, lang)
         return TelegramBotResult(
@@ -663,6 +719,13 @@ def _process_callback_query(callback_query, today, nonce_factory):
         )
     if data.startswith('repay:'):
         text = _confirm_repayment(profile.user, data, today, lang)
+        return TelegramBotResult(
+            messages=[_panel_message(chat_id, message_id, text, _main_menu_markup(include_home=True, lang=lang))],
+            callback_query_id=callback_query_id,
+            callback_text=_t(lang, 'processed'),
+        )
+    if data.startswith('advance:'):
+        text = _confirm_debt_increase(profile.user, data, today, lang)
         return TelegramBotResult(
             messages=[_panel_message(chat_id, message_id, text, _main_menu_markup(include_home=True, lang=lang))],
             callback_query_id=callback_query_id,
@@ -900,19 +963,21 @@ def _repayment_preview(user, chat_id, args_text, today, nonce_factory, lang=None
 
 def _pending_repayment_preview(user, telegram_user_id, chat_id, amount_text, today, nonce_factory, lang=None):
     lang = lang or _language_for_user(user)
-    pending_context = PENDING_REPAYMENT_OBLIGATIONS.get(telegram_user_id)
+    pending_context = PENDING_MANUAL_TRANSFERS.get(telegram_user_id)
     if isinstance(pending_context, dict):
         obligation_id = pending_context.get('obligation_id')
+        transfer_type = pending_context.get('transfer_type') or FinancialEvent.EventType.REPAYMENT
         panel_chat_id = pending_context.get('chat_id') or chat_id
         panel_message_id = pending_context.get('message_id')
     else:
         obligation_id = pending_context
+        transfer_type = FinancialEvent.EventType.REPAYMENT
         panel_chat_id = chat_id
         panel_message_id = None
 
     obligation = _get_related_open_obligation(user, obligation_id)
     if not obligation:
-        PENDING_REPAYMENT_OBLIGATIONS.pop(telegram_user_id, None)
+        PENDING_MANUAL_TRANSFERS.pop(telegram_user_id, None)
         return _panel_result(
             panel_chat_id,
             panel_message_id,
@@ -926,13 +991,14 @@ def _pending_repayment_preview(user, telegram_user_id, chat_id, amount_text, tod
             panel_chat_id,
             panel_message_id,
             f'{error}\n{_t(lang, "amount_example")}',
-            reply_markup=_repayment_amount_markup(obligation, get_obligation_balance(obligation, as_of=today), lang),
+            reply_markup=_manual_transfer_error_markup(obligation, transfer_type, today, lang),
         )
 
-    PENDING_REPAYMENT_OBLIGATIONS.pop(telegram_user_id, None)
-    return _repayment_preview_for_obligation(
+    PENDING_MANUAL_TRANSFERS.pop(telegram_user_id, None)
+    return _manual_transfer_preview_for_obligation(
         chat_id=panel_chat_id,
         obligation=obligation,
+        transfer_type=transfer_type,
         amount_units=amount_units,
         event_date=today,
         today=today,
@@ -943,8 +1009,33 @@ def _pending_repayment_preview(user, telegram_user_id, chat_id, amount_text, tod
 
 
 def _repayment_preview_for_obligation(chat_id, obligation, amount_units, event_date, today, nonce_factory, message_id=None, lang=LANG_EN):
+    return _manual_transfer_preview_for_obligation(
+        chat_id=chat_id,
+        obligation=obligation,
+        transfer_type=FinancialEvent.EventType.REPAYMENT,
+        amount_units=amount_units,
+        event_date=event_date,
+        today=today,
+        nonce_factory=nonce_factory,
+        message_id=message_id,
+        lang=lang,
+    )
+
+
+def _manual_transfer_preview_for_obligation(
+    chat_id,
+    obligation,
+    transfer_type,
+    amount_units,
+    event_date,
+    today,
+    nonce_factory,
+    message_id=None,
+    lang=LANG_EN,
+):
     balance_units = get_obligation_balance(obligation, as_of=event_date)
-    if amount_units > balance_units:
+    is_repayment = transfer_type == FinancialEvent.EventType.REPAYMENT
+    if is_repayment and amount_units > balance_units:
         return _panel_result(
             chat_id,
             message_id,
@@ -953,10 +1044,14 @@ def _repayment_preview_for_obligation(chat_id, obligation, amount_units, event_d
         )
 
     nonce = nonce_factory()
-    callback_data = f'repay:{obligation.pk}:{amount_units}:{event_date.isoformat()}:{nonce}'
+    callback_prefix = 'repay' if is_repayment else 'advance'
+    confirm_key = 'confirm_repayment' if is_repayment else 'confirm_debt_increase'
+    action_key = 'transfer_repayment' if is_repayment else 'transfer_debt_increase'
+    callback_data = f'{callback_prefix}:{obligation.pk}:{amount_units}:{event_date.isoformat()}:{nonce}'
     text = '\n'.join([
-        _t(lang, 'confirm_repayment'),
+        _t(lang, confirm_key),
         f'{_t(lang, "obligation")}: {obligation.title}',
+        f'{_t(lang, "action")}: {_t(lang, action_key)}',
         f'{_t(lang, "amount")}: {_format_money(amount_units)}',
         f'{_t(lang, "date")}: {_format_date(event_date)}',
     ])
@@ -966,7 +1061,7 @@ def _repayment_preview_for_obligation(chat_id, obligation, amount_units, event_d
         text,
         reply_markup={
             'inline_keyboard': [
-                [{'text': _t(lang, 'confirm_repayment'), 'callback_data': callback_data}],
+                [{'text': _t(lang, confirm_key), 'callback_data': callback_data}],
                 [{'text': _t(lang, 'cancel'), 'callback_data': 'noop:cancel'}],
             ],
         },
@@ -991,12 +1086,43 @@ def _obligation_callback_response(user, data, lang=None):
     return _obligation_detail_text(user, obligation, lang), _obligation_detail_markup(obligation, lang)
 
 
+def _manual_transfer_menu_callback_response(user, data, lang=None):
+    lang = lang or _language_for_user(user)
+    obligation = _get_obligation_from_callback(user, data, 'transfermenu')
+    if not obligation:
+        return _t(lang, 'unavailable_obligation'), _main_menu_markup(lang=lang)
+
+    balance_units = get_obligation_balance(obligation)
+    return (
+        '\n'.join([
+            _t(lang, 'manual_transfer'),
+            obligation.title,
+            f'{_t(lang, "current_balance")}: {_format_money(balance_units)}',
+            '',
+            _t(lang, 'choose_transfer_action'),
+        ]),
+        _manual_transfer_type_markup(obligation, lang),
+    )
+
+
+def _manual_transfer_repayment_callback_response(user, data, today, lang=None):
+    lang = lang or _language_for_user(user)
+    obligation = _get_obligation_from_transfer_action_callback(user, data, 'repayment')
+    if not obligation:
+        return _t(lang, 'unavailable_obligation'), _main_menu_markup(lang=lang)
+    return _repayment_menu_response(obligation, today, lang)
+
+
 def _repayment_menu_callback_response(user, data, today, lang=None):
     lang = lang or _language_for_user(user)
     obligation = _get_obligation_from_callback(user, data, 'repaymenu')
     if not obligation:
         return _t(lang, 'unavailable_obligation'), _main_menu_markup(lang=lang)
 
+    return _repayment_menu_response(obligation, today, lang)
+
+
+def _repayment_menu_response(obligation, today, lang):
     balance_units = get_obligation_balance(obligation, as_of=today)
     if balance_units <= 0:
         return (
@@ -1015,20 +1141,58 @@ def _repayment_menu_callback_response(user, data, today, lang=None):
     )
 
 
+def _custom_debt_increase_callback_response(user, telegram_user_id, data, chat_id, message_id, lang=None):
+    lang = lang or _language_for_user(user)
+    obligation = _get_obligation_from_transfer_action_callback(user, data, 'advance')
+    if not obligation:
+        return _t(lang, 'unavailable_obligation'), _main_menu_markup(lang=lang)
+
+    return _custom_manual_transfer_callback_response(
+        telegram_user_id=telegram_user_id,
+        chat_id=chat_id,
+        message_id=message_id,
+        obligation=obligation,
+        transfer_type=FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+        prompt_key='custom_debt_increase',
+        lang=lang,
+    )
+
+
 def _custom_repayment_callback_response(user, telegram_user_id, data, chat_id, message_id, lang=None):
     lang = lang or _language_for_user(user)
     obligation = _get_obligation_from_callback(user, data, 'customrepay')
     if not obligation:
         return _t(lang, 'unavailable_obligation'), _main_menu_markup(lang=lang)
 
-    PENDING_REPAYMENT_OBLIGATIONS[telegram_user_id] = {
+    return _custom_manual_transfer_callback_response(
+        telegram_user_id=telegram_user_id,
+        chat_id=chat_id,
+        message_id=message_id,
+        obligation=obligation,
+        transfer_type=FinancialEvent.EventType.REPAYMENT,
+        prompt_key='custom_repayment',
+        lang=lang,
+    )
+
+
+def _custom_manual_transfer_callback_response(
+    telegram_user_id,
+    chat_id,
+    message_id,
+    obligation,
+    transfer_type,
+    prompt_key,
+    lang,
+):
+    PENDING_MANUAL_TRANSFERS[telegram_user_id] = {
         'obligation_id': obligation.pk,
+        'transfer_type': transfer_type,
         'chat_id': chat_id,
         'message_id': message_id,
     }
     return (
         '\n'.join([
-            _t(lang, 'custom_repayment', title=obligation.title),
+            _t(lang, prompt_key, title=obligation.title),
             _t(lang, 'amount_example'),
         ]),
         _obligation_detail_markup(obligation, lang),
@@ -1368,9 +1532,60 @@ def _confirm_repayment(user, callback_data, today, lang=None):
     return _repayment_recorded_text(obligation, amount_units, event_date, lang=lang)
 
 
+def _confirm_debt_increase(user, callback_data, today, lang=None):
+    lang = lang or _language_for_user(user)
+    parts = callback_data.split(':')
+    if len(parts) != 5:
+        return _t(lang, 'invalid_repayment_confirmation')
+
+    _, obligation_id, amount_units_text, event_date_text, nonce = parts
+    try:
+        obligation = _get_related_open_obligation(user, int(obligation_id))
+        amount_units = int(amount_units_text)
+        event_date = date.fromisoformat(event_date_text)
+    except (TypeError, ValueError):
+        return _t(lang, 'invalid_repayment_confirmation')
+
+    if not obligation or amount_units <= 0:
+        return _t(lang, 'invalid_repayment_confirmation')
+    if event_date > today:
+        return _t(lang, 'repayment_future_date')
+
+    idempotency_key = f'telegram-advance:{user.pk}:{obligation.pk}:{nonce}'
+    existing = LedgerTransaction.objects.filter(idempotency_key=idempotency_key).first()
+    if existing:
+        return _debt_increase_recorded_text(obligation, amount_units, event_date, already_recorded=True, lang=lang)
+
+    try:
+        post_principal_advance(
+            obligation,
+            amount_units=amount_units,
+            event_date=event_date,
+            memo=f'Telegram debt increase by {_user_label(user)}',
+            category='telegram',
+            idempotency_key=idempotency_key,
+        )
+    except ValidationError as error:
+        return _validation_error_text(error, lang)
+
+    return _debt_increase_recorded_text(obligation, amount_units, event_date, lang=lang)
+
+
 def _repayment_recorded_text(obligation, amount_units, event_date, already_recorded=False, lang=LANG_EN):
     balance_units = get_obligation_balance(obligation)
     heading = _t(lang, 'repayment_already_recorded') if already_recorded else _t(lang, 'repayment_recorded')
+    return '\n'.join([
+        heading,
+        f'{_t(lang, "obligation")}: {obligation.title}',
+        f'{_t(lang, "amount")}: {_format_money(amount_units)}',
+        f'{_t(lang, "date")}: {_format_date(event_date)}',
+        f'{_t(lang, "current_balance")}: {_format_money(balance_units)}',
+    ])
+
+
+def _debt_increase_recorded_text(obligation, amount_units, event_date, already_recorded=False, lang=LANG_EN):
+    balance_units = get_obligation_balance(obligation)
+    heading = _t(lang, 'debt_increase_already_recorded') if already_recorded else _t(lang, 'debt_increase_recorded')
     return '\n'.join([
         heading,
         f'{_t(lang, "obligation")}: {obligation.title}',
@@ -1451,6 +1666,17 @@ def _get_obligation_from_callback(user, data, prefix):
     return _get_related_open_obligation(user, obligation_id)
 
 
+def _get_obligation_from_transfer_action_callback(user, data, action):
+    parts = data.split(':')
+    if len(parts) != 3 or parts[0] != 'transfer' or parts[1] != action:
+        return None
+    try:
+        obligation_id = int(parts[2])
+    except ValueError:
+        return None
+    return _get_related_open_obligation(user, obligation_id)
+
+
 def _parse_amount_units(amount_text, lang=LANG_EN):
     amount_text = _normalize_decimal_text(amount_text)
     try:
@@ -1509,7 +1735,7 @@ def _get_counterparty(user, raw_user_id):
 
 
 def _clear_pending_context(telegram_user_id):
-    PENDING_REPAYMENT_OBLIGATIONS.pop(telegram_user_id, None)
+    PENDING_MANUAL_TRANSFERS.pop(telegram_user_id, None)
     PENDING_OBLIGATION_CREATIONS.pop(telegram_user_id, None)
 
 
@@ -1580,12 +1806,22 @@ def _obligations_menu_markup(user, lang=None):
 def _obligation_detail_markup(obligation, lang=LANG_EN):
     return {
         'inline_keyboard': [
-            [{'text': _t(lang, 'add_repayment'), 'callback_data': f'repaymenu:{obligation.pk}'}],
+            [{'text': _t(lang, 'add_manual_transfer'), 'callback_data': f'transfermenu:{obligation.pk}'}],
             [{'text': _t(lang, 'back_to_obligations'), 'callback_data': 'menu:obligations'}],
             [
                 {'text': _t(lang, 'home'), 'callback_data': 'menu:home'},
                 {'text': _t(lang, 'balance'), 'callback_data': 'menu:balance'},
             ],
+        ],
+    }
+
+
+def _manual_transfer_type_markup(obligation, lang=LANG_EN):
+    return {
+        'inline_keyboard': [
+            [{'text': _t(lang, 'transfer_repayment'), 'callback_data': f'transfer:repayment:{obligation.pk}'}],
+            [{'text': _t(lang, 'transfer_debt_increase'), 'callback_data': f'transfer:advance:{obligation.pk}'}],
+            [{'text': _t(lang, 'back'), 'callback_data': f'ob:{obligation.pk}'}],
         ],
     }
 
@@ -1784,6 +2020,12 @@ def _repayment_amount_markup(obligation, balance_units, lang=LANG_EN):
     rows.append([{'text': _t(lang, 'custom_amount'), 'callback_data': f'customrepay:{obligation.pk}'}])
     rows.append([{'text': _t(lang, 'back'), 'callback_data': f'ob:{obligation.pk}'}])
     return {'inline_keyboard': rows}
+
+
+def _manual_transfer_error_markup(obligation, transfer_type, today, lang=LANG_EN):
+    if transfer_type == FinancialEvent.EventType.REPAYMENT:
+        return _repayment_amount_markup(obligation, get_obligation_balance(obligation, as_of=today), lang)
+    return _obligation_detail_markup(obligation, lang)
 
 
 def _format_money(amount_units):

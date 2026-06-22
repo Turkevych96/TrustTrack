@@ -405,12 +405,85 @@ class CreateObligationForm(MoneyForm):
         return rate
 
 
-class RepaymentForm(MoneyForm):
+class ManualTransferCreateForm(MoneyForm):
+    transfer_type = forms.ChoiceField(
+        label='Action',
+        required=False,
+        widget=forms.RadioSelect,
+        initial=FinancialEvent.EventType.REPAYMENT,
+        help_text='Choose whether this payment reduces the balance or adds more debt to this obligation.',
+    )
     event_date = forms.DateField(
         initial=timezone.localdate,
         widget=forms.DateInput(attrs={'type': 'date'}),
     )
+    category = forms.CharField(max_length=80, required=False)
     memo = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
+
+    def __init__(self, *args, actor=None, obligation=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._transfer_action_options = self._transfer_type_choices(actor, obligation)
+        self.fields['transfer_type'].choices = [
+            (option['value'], f'{option["title"]} - {option["description"]}')
+            for option in self._transfer_action_options
+        ]
+        self.order_fields(['transfer_type', 'amount', 'event_date', 'category', 'memo'])
+
+    def clean_transfer_type(self):
+        return self.cleaned_data.get('transfer_type') or FinancialEvent.EventType.REPAYMENT
+
+    @property
+    def transfer_action_cards(self):
+        selected_value = self['transfer_type'].value() or FinancialEvent.EventType.REPAYMENT
+        return [
+            {
+                **option,
+                'id': f'id_{self.add_prefix("transfer_type")}_{index}',
+                'checked': str(option['value']) == str(selected_value),
+            }
+            for index, option in enumerate(self._transfer_action_options)
+        ]
+
+    @staticmethod
+    def _transfer_type_choices(actor, obligation):
+        if actor and obligation and obligation.borrower_id == actor.id:
+            return (
+                {
+                    'value': FinancialEvent.EventType.REPAYMENT,
+                    'title': 'Repayment',
+                    'description': 'I paid money back',
+                },
+                {
+                    'value': FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+                    'title': 'Debt increase',
+                    'description': 'I borrowed more money',
+                },
+            )
+        if actor and obligation and obligation.creditor_id == actor.id:
+            return (
+                {
+                    'value': FinancialEvent.EventType.REPAYMENT,
+                    'title': 'Repayment',
+                    'description': 'Borrower paid me back',
+                },
+                {
+                    'value': FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+                    'title': 'Debt increase',
+                    'description': 'I lent more money',
+                },
+            )
+        return (
+            {
+                'value': FinancialEvent.EventType.REPAYMENT,
+                'title': 'Repayment',
+                'description': 'Decreases debt',
+            },
+            {
+                'value': FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+                'title': 'Debt increase',
+                'description': 'Increases debt',
+            },
+        )
 
 
 class ManualTransferForm(MoneyForm):

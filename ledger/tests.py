@@ -296,7 +296,7 @@ class TelegramBotTests(LedgerTestCase):
         self.assertIn('Текущий баланс: $75.00', detail.messages[0].text)
         self.assertEqual(
             detail.messages[0].reply_markup['inline_keyboard'][0][0],
-            {'text': 'Добавить погашение', 'callback_data': f'repaymenu:{self.obligation.pk}'},
+            {'text': 'Ручная операция', 'callback_data': f'transfermenu:{self.obligation.pk}'},
         )
         self.assertIn('Последние операции', recent.messages[0].text)
         self.assertIn('Погашение', recent.messages[0].text)
@@ -465,7 +465,11 @@ class TelegramBotTests(LedgerTestCase):
             today=date(2026, 1, 10),
         )
         repayment_menu_result = process_telegram_update(
-            self._telegram_callback(f'repaymenu:{self.obligation.pk}', telegram_id=555),
+            self._telegram_callback(f'transfer:repayment:{self.obligation.pk}', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+        transfer_menu_result = process_telegram_update(
+            self._telegram_callback(f'transfermenu:{self.obligation.pk}', telegram_id=555),
             today=date(2026, 1, 10),
         )
 
@@ -494,7 +498,15 @@ class TelegramBotTests(LedgerTestCase):
         self.assertNotIn(f'O{self.obligation.pk}', detail_result.messages[0].text)
         self.assertEqual(
             detail_result.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
-            f'repaymenu:{self.obligation.pk}',
+            f'transfermenu:{self.obligation.pk}',
+        )
+        self.assertIn('Manual transfer', transfer_menu_result.messages[0].text)
+        self.assertEqual(
+            transfer_menu_result.messages[0].reply_markup['inline_keyboard'][:2],
+            [
+                [{'text': 'Repayment', 'callback_data': f'transfer:repayment:{self.obligation.pk}'}],
+                [{'text': 'Debt increase', 'callback_data': f'transfer:advance:{self.obligation.pk}'}],
+            ],
         )
         self.assertNotIn(f'O{self.obligation.pk}', repayment_menu_result.messages[0].text)
         repayment_buttons = repayment_menu_result.messages[0].reply_markup['inline_keyboard']
@@ -616,6 +628,38 @@ class TelegramBotTests(LedgerTestCase):
         self.assertTrue(second_result.messages[0].replace_existing)
         self.assertNotIn(f'O{self.obligation.pk}', second_result.messages[0].text)
         self.assertEqual(LedgerTransaction.objects.filter(idempotency_key__startswith='telegram-repayment:').count(), 1)
+
+    def test_debt_increase_button_records_manual_advance(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+
+        prompt = process_telegram_update(
+            self._telegram_callback(f'transfer:advance:{self.obligation.pk}', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+        confirmation = process_telegram_update(
+            self._telegram_message('75.00', telegram_id=555),
+            today=date(2026, 1, 10),
+            nonce_factory=lambda: 'advance',
+        )
+        update = self._telegram_callback(
+            f'advance:{self.obligation.pk}:750000:2026-01-10:advance',
+            telegram_id=555,
+        )
+
+        first_result = process_telegram_update(update, today=date(2026, 1, 10))
+        second_result = process_telegram_update(update, today=date(2026, 1, 10))
+
+        self.assertIn('Debt increase for Test loan', prompt.messages[0].text)
+        self.assertIn('Confirm debt increase', confirmation.messages[0].text)
+        self.assertIn('Action: Debt increase', confirmation.messages[0].text)
+        self.assertEqual(
+            confirmation.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
+            f'advance:{self.obligation.pk}:750000:2026-01-10:advance',
+        )
+        self.assertEqual(get_obligation_balance(self.obligation), 750_000)
+        self.assertIn('Debt increase recorded', first_result.messages[0].text)
+        self.assertIn('already recorded', second_result.messages[0].text)
+        self.assertEqual(LedgerTransaction.objects.filter(idempotency_key__startswith='telegram-advance:').count(), 1)
 
     def test_group_chat_does_not_expose_financial_data(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
@@ -2418,7 +2462,7 @@ class ViewTests(LedgerTestCase):
 
         response = self.client.get(reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
 
-        self.assertContains(response, 'Repayment')
+        self.assertContains(response, 'Manual transfer')
         self.assertContains(response, 'Obligation settings')
         self.assertContains(response, 'Recalculate balance &amp; interest')
         self.assertContains(response, 'data-recalculate-form')
@@ -2576,6 +2620,40 @@ class ViewTests(LedgerTestCase):
             ).exists()
         )
         self.assertEqual(get_obligation_balance(self.obligation), 800_000)
+
+    def test_manual_transfer_create_form_uses_role_specific_action_labels(self):
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('ledger:manual_transfer_create', kwargs={'pk': self.obligation.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Record manual transfer: Test loan')
+        self.assertContains(response, 'Repayment')
+        self.assertContains(response, 'I paid money back')
+        self.assertContains(response, 'Debt increase')
+        self.assertContains(response, 'I borrowed more money')
+        self.assertContains(response, 'Record transfer')
+
+    def test_manual_transfer_create_can_add_debt_increase(self):
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.post(
+            reverse('ledger:manual_transfer_create', kwargs={'pk': self.obligation.pk}),
+            {
+                'transfer_type': FinancialEvent.EventType.PRINCIPAL_ADVANCE,
+                'event_date': '2026-01-10',
+                'amount': '75.00',
+                'category': 'Cash',
+                'memo': 'Borrowed more',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': self.obligation.pk}))
+        event = FinancialEvent.objects.get(obligation=self.obligation, memo='Borrowed more')
+        self.assertEqual(event.event_type, FinancialEvent.EventType.PRINCIPAL_ADVANCE)
+        self.assertEqual(event.amount_units, 750_000)
+        self.assertEqual(event.category, 'Cash')
+        self.assertEqual(get_obligation_balance(self.obligation), 750_000)
 
     def test_generated_transfer_cannot_use_manual_transfer_edit_url(self):
         series = EventSeries.objects.create(

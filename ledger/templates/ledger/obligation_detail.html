@@ -13,7 +13,7 @@
     </div>
     {% if obligation.status == "open" %}
         <div class="actions">
-            <a class="button secondary" href="{% url 'ledger:repayment_create' obligation.id %}">Repayment</a>
+            <a class="button secondary" href="{% url 'ledger:manual_transfer_create' obligation.id %}">Manual transfer</a>
             <a class="button secondary" href="{% url 'ledger:recurring_charge_create' obligation.id %}">Recurring event</a>
             <a class="button secondary" href="{% url 'ledger:interest_rate_create' obligation.id %}">Interest rate</a>
             <details class="action-menu">

@@ -28,6 +28,7 @@ urlpatterns = [
     path('obligations/<int:pk>/recalculate/', views.obligation_recalculate, name='obligation_recalculate'),
     path('obligations/<int:pk>/history/', views.obligation_history, name='obligation_history'),
     path('obligations/<int:pk>/history/accounting/', views.obligation_accounting_history, name='obligation_accounting_history'),
+    path('obligations/<int:pk>/manual-transfers/new/', views.manual_transfer_create, name='manual_transfer_create'),
     path('obligations/<int:pk>/repay/', views.repayment_create, name='repayment_create'),
     path('obligations/<int:pk>/manual-transfers/<int:event_pk>/edit/', views.manual_transfer_update, name='manual_transfer_update'),
     path('obligations/<int:pk>/charges/new/', views.recurring_charge_create, name='recurring_charge_create'),

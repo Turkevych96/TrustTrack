@@ -25,6 +25,7 @@ from ledger.forms import (
     CreateObligationForm,
     InterestRecalculateForm,
     InterestRatePeriodForm,
+    ManualTransferCreateForm,
     ManualTransferForm,
     ModulePreferencesForm,
     PayoffSimulatorForm,
@@ -32,7 +33,6 @@ from ledger.forms import (
     RecurringChargeForm,
     RecurringRecalculateForm,
     RecurringSeriesUpdateForm,
-    RepaymentForm,
     SignUpForm,
     UserProfileForm,
 )
@@ -958,33 +958,46 @@ def obligation_create(request):
 
 
 @login_required
-def repayment_create(request, pk):
+def manual_transfer_create(request, pk):
     obligation = get_related_obligation(request.user, pk)
     if request.method == 'POST':
-        form = RepaymentForm(request.POST)
+        form = ManualTransferCreateForm(request.POST, actor=request.user, obligation=obligation)
         if form.is_valid():
             try:
-                post_repayment(
-                    obligation,
-                    amount_units=form.amount_units,
-                    event_date=form.cleaned_data['event_date'],
-                    memo=form.cleaned_data.get('memo', ''),
-                )
+                if form.cleaned_data['transfer_type'] == FinancialEvent.EventType.PRINCIPAL_ADVANCE:
+                    post_principal_advance(
+                        obligation,
+                        amount_units=form.amount_units,
+                        event_date=form.cleaned_data['event_date'],
+                        category=form.cleaned_data.get('category', ''),
+                        memo=form.cleaned_data.get('memo', ''),
+                    )
+                else:
+                    post_repayment(
+                        obligation,
+                        amount_units=form.amount_units,
+                        event_date=form.cleaned_data['event_date'],
+                        category=form.cleaned_data.get('category', ''),
+                        memo=form.cleaned_data.get('memo', ''),
+                    )
                 return redirect('ledger:obligation_detail', pk=obligation.pk)
             except ValidationError as error:
                 form.add_error(None, error)
     else:
-        form = RepaymentForm()
+        form = ManualTransferCreateForm(actor=request.user, obligation=obligation)
     return render(
         request,
         'ledger/form.html',
         {
-            'title': f'Record repayment: {obligation.title}',
+            'title': f'Record manual transfer: {obligation.title}',
             'form': form,
-            'submit_label': 'Record repayment',
+            'submit_label': 'Record transfer',
             'back_url': reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}),
         },
     )
+
+
+repayment_create = manual_transfer_create
 
 
 @login_required

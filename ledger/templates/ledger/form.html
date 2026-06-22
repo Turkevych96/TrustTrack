@@ -17,7 +17,21 @@
     {% for field in form %}
         <div data-field-name="{{ field.name }}">
             <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-            {{ field }}
+            {% if field.name == "transfer_type" and form.transfer_action_cards %}
+                <div class="choice-card-grid">
+                    {% for choice in form.transfer_action_cards %}
+                        <label class="choice-card" for="{{ choice.id }}">
+                            <input id="{{ choice.id }}" type="radio" name="{{ field.html_name }}" value="{{ choice.value }}"{% if choice.checked %} checked{% endif %}>
+                            <span>
+                                <strong>{{ choice.title }}</strong>
+                                <span class="muted">{{ choice.description }}</span>
+                            </span>
+                        </label>
+                    {% endfor %}
+                </div>
+            {% else %}
+                {{ field }}
+            {% endif %}
             {% if field.help_text %}<div class="muted">{{ field.help_text }}</div>{% endif %}
             {{ field.errors }}
         </div>
