@@ -1675,6 +1675,37 @@ class ViewTests(LedgerTestCase):
         self.assertNotContains(staff_response, reverse('admin:index'))
         self.assertContains(staff_response, 'Admin')
 
+    def test_dashboard_recent_activity_uses_human_financial_events(self):
+        post_principal_advance(
+            self.obligation,
+            amount_units=500_000,
+            event_date=date(2026, 6, 22),
+            category='telegram',
+            memo='Telegram debt increase by andrii',
+        )
+        post_scheduled_charge(
+            self.obligation,
+            amount_units=100_000,
+            event_date=date(2026, 6, 1),
+            category='rent',
+        )
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get(reverse('ledger:dashboard'))
+
+        latest_row = response.context['recent_activity_rows'][0]
+        self.assertEqual(latest_row['label'], 'You borrowed')
+        self.assertEqual(latest_row['category'], 'telegram')
+        self.assertEqual(latest_row['details'], 'Telegram debt increase by andrii')
+        self.assertEqual(latest_row['signed_amount_units'], 500_000)
+        self.assertContains(response, 'Recent activity')
+        self.assertContains(response, 'You borrowed')
+        self.assertContains(response, 'telegram')
+        self.assertContains(response, 'Telegram debt increase by andrii')
+        self.assertContains(response, '+$50.00')
+        self.assertContains(response, 'Charge added')
+        self.assertNotContains(response, '<td>Principal advance</td>', html=True)
+
     def test_admin_panel_is_staff_only_and_links_to_django_admin(self):
         self.client.force_login(self.borrower_user)
 

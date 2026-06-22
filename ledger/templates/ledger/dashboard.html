@@ -49,35 +49,45 @@
     </section>
 {% endif %}
 
-<section class="grid main-side section-gap">
-    <div>
-        <h2>Open obligations</h2>
-        {% include "ledger/partials/obligation_table.html" with rows=rows %}
-    </div>
-    <div>
-        <h2>Recent transactions</h2>
-        <div class="table-wrap">
-            <table>
-                <thead>
+<section class="section-gap">
+    <h2>Open obligations</h2>
+    {% include "ledger/partials/obligation_table.html" with rows=rows %}
+</section>
+
+<section class="section-gap">
+    <h2>Recent activity</h2>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Activity</th>
+                    <th>Obligation</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in recent_activity_rows %}
                     <tr>
-                        <th>Date</th>
-                        <th>Type</th>
-                        <th>Obligation</th>
+                        <td>{{ row.event.event_date }}</td>
+                        <td class="activity-cell">
+                            {{ row.label }}
+                            {% if row.category or row.details %}
+                                <div class="muted activity-meta">
+                                    {% if row.category %}{{ row.category }}{% endif %}
+                                    {% if row.category and row.details %} - {% endif %}
+                                    {% if row.details %}{{ row.details }}{% endif %}
+                                </div>
+                            {% endif %}
+                        </td>
+                        <td><a href="{% url 'ledger:obligation_detail' row.event.obligation_id %}">{{ row.event.obligation.title }}</a></td>
+                        <td class="amount {{ row.amount_class }}">{{ row.signed_amount_units|signed_money_units }}</td>
                     </tr>
-                </thead>
-                <tbody>
-                    {% for transaction in recent_transactions %}
-                        <tr>
-                            <td>{{ transaction.transaction_date }}</td>
-                            <td>{{ transaction.get_transaction_type_display }}</td>
-                            <td><a href="{% url 'ledger:obligation_detail' transaction.obligation_id %}">{{ transaction.obligation.title }}</a></td>
-                        </tr>
-                    {% empty %}
-                        <tr><td colspan="3" class="empty">No transactions yet.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+                {% empty %}
+                    <tr><td colspan="4" class="empty">No activity yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </section>
 {% endblock %}

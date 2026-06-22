@@ -654,11 +654,12 @@ def dashboard(request):
     rows = [_obligation_row(obligation, request.user) for obligation in open_obligations]
     i_owe = sum(row['balance_units'] for row in rows if row['role'] == 'borrower')
     owed_to_me = sum(row['balance_units'] for row in rows if row['role'] == 'creditor')
-    recent_transactions = (
-        LedgerTransaction.objects.filter(obligation__in=open_obligations)
-        .select_related('obligation', 'financial_event')
-        .order_by('-transaction_date', '-created_at')[:10]
+    recent_activity_events = (
+        FinancialEvent.objects.filter(obligation__in=all_obligations, voided_at__isnull=True)
+        .select_related('obligation')
+        .order_by('-event_date', '-created_at')[:10]
     )
+    recent_activity_rows = [_activity_row(event, request.user) for event in recent_activity_events]
     return render(
         request,
         'ledger/dashboard.html',
@@ -667,7 +668,7 @@ def dashboard(request):
             'i_owe': i_owe,
             'owed_to_me': owed_to_me,
             'net_balance': owed_to_me - i_owe,
-            'recent_transactions': recent_transactions,
+            'recent_activity_rows': recent_activity_rows,
             'balance_history': balance_history,
             'balance_history_chart_payload': balance_history_payload,
             'balance_history_latest_net_class': 'positive' if balance_history['latest_net_units'] >= 0 else 'negative',
