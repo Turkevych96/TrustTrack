@@ -9,15 +9,14 @@ from django.utils import timezone
 from ledger.models import FinancialEvent, InterestAccrualRun, InterestRatePeriod, LedgerTransaction, Obligation
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import _post_debt_increase, post_interest_reversal
+from ledger.services.rates import monthly_rate_from_annual_yield_percent
 from ledger.services.recurring import next_month_start
-
-
-FIXED_DAYS_IN_YEAR = Decimal('365')
 
 
 def calculate_monthly_interest(obligation, period_start):
     period_start = period_start.replace(day=1)
     period_end = next_month_start(period_start)
+    days_in_month = (period_end - period_start).days
     total_interest_units = Decimal('0')
     daily_details = []
 
@@ -25,17 +24,18 @@ def calculate_monthly_interest(obligation, period_start):
     while current_date < period_end:
         balance_units = get_obligation_balance(obligation, as_of=current_date)
         annual_rate_percent = _rate_for_date(obligation, current_date)
-        daily_interest_units = (
-            Decimal(balance_units)
-            * (annual_rate_percent / Decimal('100'))
-            / FIXED_DAYS_IN_YEAR
-        )
+        monthly_rate = monthly_rate_from_annual_yield_percent(annual_rate_percent)
+        daily_rate = monthly_rate / Decimal(days_in_month)
+        daily_interest_units = Decimal(balance_units) * daily_rate
         total_interest_units += daily_interest_units
         daily_details.append(
             {
                 'date': current_date.isoformat(),
                 'balance_units': balance_units,
                 'annual_rate_percent': str(annual_rate_percent),
+                'annual_rate_type': 'APY',
+                'monthly_rate': str(monthly_rate),
+                'daily_rate': str(daily_rate),
                 'interest_units': str(daily_interest_units),
             }
         )

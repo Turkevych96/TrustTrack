@@ -391,7 +391,8 @@ This keeps the ledger append-only and still gives the current balance the correc
 TrustTrack should follow a credit-bureau-like daily interest model with monthly posting:
 
 ```text
-daily_rate = annual_rate_percent / 100 / days_in_year
+monthly_rate = (1 + annual_rate_percent / 100) ^ (1 / 12) - 1
+daily_rate = monthly_rate / days_in_month
 segment_interest = segment_balance * daily_rate * segment_day_count
 monthly_interest = sum(segment_interest for all segments in the month)
 ```
@@ -410,7 +411,7 @@ Rules:
 
 Day-count basis:
 
-- v1 uses APR divided by a fixed 365-day year
+- annual_rate_percent is treated as APY and converted to an effective monthly rate
 - this can become configurable later if needed
 
 Posting convention:

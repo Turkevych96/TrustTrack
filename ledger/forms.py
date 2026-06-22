@@ -254,13 +254,13 @@ class CreateObligationForm(MoneyForm):
     )
     has_interest = forms.BooleanField(label='With interest', required=False)
     annual_rate_percent = forms.DecimalField(
-        label='Annual interest rate (%)',
+        label='Annual percentage yield (APY %)',
         max_digits=9,
         decimal_places=4,
         min_value=Decimal('0.0001'),
         required=False,
         widget=forms.NumberInput(attrs={'step': '0.0001', 'min': '0.0001'}),
-        help_text='Example: 3.5 means 3.5% APR.',
+        help_text='Example: 3.5 means 3.5% APY.',
     )
     memo = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
 
@@ -681,6 +681,12 @@ class InterestRatePeriodForm(forms.ModelForm):
     class Meta:
         model = InterestRatePeriod
         fields = ['annual_rate_percent', 'effective_from', 'effective_to', 'memo']
+        labels = {
+            'annual_rate_percent': 'Annual percentage yield (APY %)',
+        }
+        help_texts = {
+            'annual_rate_percent': 'Example: 3.5 means 3.5% APY.',
+        }
         widgets = {
             'effective_from': forms.DateInput(attrs={'type': 'date'}),
             'effective_to': forms.DateInput(attrs={'type': 'date'}),

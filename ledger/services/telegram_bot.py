@@ -279,8 +279,8 @@ TELEGRAM_TEXT = {
     'no_interest': {LANG_EN: 'No interest', LANG_RU: 'Без процентов'},
     'with_interest': {LANG_EN: 'With interest', LANG_RU: 'С процентами'},
     'send_interest_rate': {
-        LANG_EN: 'Send annual interest rate, for example: 3.5 or 3,5',
-        LANG_RU: 'Отправьте годовую процентную ставку, например: 3.5 или 3,5',
+        LANG_EN: 'Send annual interest rate (APY), for example: 3.5 or 3,5',
+        LANG_RU: 'Отправьте годовую процентную ставку (APY), например: 3.5 или 3,5',
     },
     'interest_option_error': {
         LANG_EN: 'Choose an interest option.',
@@ -1651,7 +1651,7 @@ def _new_obligation_confirm_text(user, context, lang=LANG_EN):
     counterparty_label = _user_label(counterparty) if counterparty else _t(lang, 'unknown')
     interest_label = _t(lang, 'yes_no_no')
     if context.get('has_interest'):
-        interest_label = f'{context["annual_rate_percent"]}% APR'
+        interest_label = f'{context["annual_rate_percent"]}% APY'
     return '\n'.join([
         _t(lang, 'create_obligation_question'),
         f'{_t(lang, "title")}: {context.get("title", "")}',

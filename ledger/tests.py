@@ -378,7 +378,7 @@ class TelegramBotTests(LedgerTestCase):
         obligation = Obligation.objects.get(title='Telegram rent')
         series = EventSeries.objects.get(obligation=obligation)
         rate = InterestRatePeriod.objects.get(obligation=obligation)
-        self.assertIn('3.5% APR', confirmation.messages[0].text)
+        self.assertIn('3.5% APY', confirmation.messages[0].text)
         self.assertIn('Obligation created', created.messages[0].text)
         self.assertEqual(obligation.creditor, self.creditor_user)
         self.assertEqual(obligation.borrower, self.borrower_user)
@@ -884,7 +884,7 @@ class RecurringTests(LedgerTestCase):
 
 
 class InterestTests(LedgerTestCase):
-    def test_interest_uses_apr_divided_by_365(self):
+    def test_interest_uses_apy_converted_to_monthly_rate(self):
         post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
         InterestRatePeriod.objects.create(
             obligation=self.obligation,
@@ -894,7 +894,22 @@ class InterestTests(LedgerTestCase):
 
         calculation = calculate_monthly_interest(self.obligation, date(2026, 1, 1))
 
-        self.assertEqual(calculation['amount_units'], 31_000)
+        self.assertEqual(calculation['amount_units'], 29_106)
+        self.assertEqual(calculation['daily_details'][0]['annual_rate_type'], 'APY')
+
+    def test_apy_annual_total_matches_displayed_yield_after_monthly_posting(self):
+        post_principal_advance(self.obligation, amount_units=10_000_000, event_date=date(2026, 1, 1))
+        InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('3.5000'),
+            effective_from=date(2026, 1, 1),
+        )
+
+        runs = generate_due_interest(self.obligation, through_date=date(2027, 1, 15))
+
+        self.assertEqual(len(runs), 12)
+        self.assertEqual(sum(run.calculated_interest_amount_units for run in runs), 349_999)
+        self.assertEqual(money_units(sum(run.calculated_interest_amount_units for run in runs)), '$35.00')
 
     def test_repayment_changes_interest_base_from_repayment_date(self):
         post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
@@ -907,7 +922,7 @@ class InterestTests(LedgerTestCase):
 
         calculation = calculate_monthly_interest(self.obligation, date(2026, 1, 1))
 
-        self.assertEqual(calculation['amount_units'], 23_000)
+        self.assertEqual(calculation['amount_units'], 21_594)
 
     def test_rate_change_splits_interest_calculation(self):
         post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
@@ -925,7 +940,7 @@ class InterestTests(LedgerTestCase):
 
         calculation = calculate_monthly_interest(self.obligation, date(2026, 1, 1))
 
-        self.assertEqual(calculation['amount_units'], 47_000)
+        self.assertEqual(calculation['amount_units'], 42_924)
 
     def test_monthly_interest_posting_creates_balanced_transaction(self):
         post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
@@ -944,7 +959,7 @@ class InterestTests(LedgerTestCase):
             entry.amount_units for entry in ledger_transaction.entries.all() if entry.side == LedgerEntry.Side.CREDIT
         )
 
-        self.assertEqual(run.calculated_interest_amount_units, 31_000)
+        self.assertEqual(run.calculated_interest_amount_units, 29_106)
         self.assertEqual(ledger_transaction.status, LedgerTransaction.Status.POSTED)
         self.assertEqual(debit_total, credit_total)
 
@@ -1026,7 +1041,7 @@ class InterestTests(LedgerTestCase):
         self.assertEqual(original_february.status, InterestAccrualRun.Status.VOIDED)
         self.assertEqual(len(result['reversal_transactions']), 2)
         self.assertEqual([run.revision for run in posted_runs], [2, 2])
-        self.assertEqual([run.calculated_interest_amount_units for run in posted_runs], [23_000, 14_176])
+        self.assertEqual([run.calculated_interest_amount_units for run in posted_runs], [21_594, 14_725])
         self.assertLess(get_obligation_balance(self.obligation), old_balance)
 
 
@@ -2898,7 +2913,7 @@ class ViewTests(LedgerTestCase):
             period_start=date(2026, 1, 1),
             status=InterestAccrualRun.Status.POSTED,
         )
-        self.assertEqual(january_interest.calculated_interest_amount_units, 16_986)
+        self.assertEqual(january_interest.calculated_interest_amount_units, 15_948)
 
         transaction_count = LedgerTransaction.objects.count()
         financial_event_count = FinancialEvent.objects.count()

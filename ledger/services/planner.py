@@ -7,10 +7,8 @@ from django.utils import timezone
 
 from ledger.models import EventSeries, EventSeriesVersion, FinancialEvent, InterestRatePeriod, Obligation
 from ledger.services.balances import get_obligation_balance
+from ledger.services.rates import daily_rate_from_annual_yield_percent
 from ledger.services.recurring import _occurrences_for_month, next_month_start
-
-
-FIXED_DAYS_IN_YEAR = Decimal('365')
 
 
 def build_portfolio_projection(obligations, user, months=12, start_date=None):
@@ -100,6 +98,7 @@ def project_obligation(
 
     for _ in range(months):
         period_end = next_month_start(period_start)
+        days_in_month = (period_end - period_start).days
         interest_units = Decimal('0')
         planned_events = _planned_events_by_date(obligation, period_start, period_end, replace_scheduled_repayments)
         while current_day < period_end:
@@ -114,7 +113,8 @@ def project_obligation(
                         payoff_date = current_day
                 annual_rate_percent = _rate_for_date(obligation, current_day)
                 if balance_units > 0 and annual_rate_percent:
-                    interest_units += Decimal(balance_units) * (annual_rate_percent / Decimal('100')) / FIXED_DAYS_IN_YEAR
+                    daily_rate = daily_rate_from_annual_yield_percent(annual_rate_percent, days_in_month)
+                    interest_units += Decimal(balance_units) * daily_rate
             current_day += timedelta(days=1)
 
         posted_interest_units = int(interest_units.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
