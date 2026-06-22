@@ -60,6 +60,7 @@ class UserProfile(TimestampedModel):
     )
     show_planner_module = models.BooleanField(default=True)
     show_dashboard_balance_history = models.BooleanField(default=True)
+    payment_due_notifications = models.BooleanField(default=True)
 
     class Meta:
         ordering = ['user__username']

@@ -221,6 +221,7 @@ class TelegramBotTests(LedgerTestCase):
         )
 
         self.assertIn('Settings', settings.messages[0].text)
+        self.assertIn('Payment notifications: on', settings.messages[0].text)
         self.assertEqual(
             settings.messages[0].reply_markup['inline_keyboard'][0],
             [
@@ -243,6 +244,22 @@ class TelegramBotTests(LedgerTestCase):
                 [{'text': 'Последние операции', 'callback_data': 'menu:recent'}],
             ],
         )
+
+    def test_settings_can_disable_telegram_due_notifications(self):
+        profile = UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+
+        disabled = process_telegram_update(self._telegram_callback('settings:due:off', telegram_id=555))
+        profile.refresh_from_db()
+        self.assertFalse(profile.payment_due_notifications)
+
+        enabled = process_telegram_update(self._telegram_callback('settings:due:on', telegram_id=555))
+        profile.refresh_from_db()
+
+        self.assertIn('Notification settings updated', disabled.messages[0].text)
+        self.assertIn('Payment notifications: off', disabled.messages[0].text)
+        self.assertEqual(disabled.messages[0].reply_markup['inline_keyboard'][1][0]['text'], 'Turn notifications on')
+        self.assertIn('Payment notifications: on', enabled.messages[0].text)
+        self.assertTrue(profile.payment_due_notifications)
 
     def test_russian_language_localizes_telegram_panels(self):
         UserProfile.objects.create(
@@ -1223,6 +1240,83 @@ class BackupTests(SimpleTestCase):
 
 
 class DueJobTests(LedgerTestCase):
+    def test_run_due_jobs_notifies_obligation_participants_when_balance_changes(self):
+        UserProfile.objects.create(user=self.creditor_user, telegram_id=111, telegram_chat_type='private')
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=222, telegram_chat_type='private')
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Rent',
+            day_of_month=1,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=1_000_000,
+            valid_from=date(2026, 1, 1),
+        )
+
+        with patch('ledger.services.notifications.send_telegram_message', return_value={'message_id': 1}) as send:
+            first_result = run_due_jobs(through_date=date(2026, 1, 1))
+            second_result = run_due_jobs(through_date=date(2026, 1, 1))
+
+        self.assertEqual(first_result.recurring_created, 1)
+        self.assertEqual(first_result.notifications_sent, 2)
+        self.assertEqual(second_result.notifications_sent, 0)
+        self.assertEqual(send.call_count, 2)
+        self.assertEqual({call.args[0] for call in send.call_args_list}, {111, 222})
+        message_text = send.call_args_list[0].args[1]
+        self.assertIn('TrustTrack balance update', message_text)
+        self.assertIn('Test loan', message_text)
+        self.assertIn('Balance changed: $0.00 -> $100.00', message_text)
+        self.assertIn('Scheduled amount: +$100.00', message_text)
+        self.assertIn('Interest amount: +$0.00', message_text)
+        self.assertIn('/settings', message_text)
+
+    def test_run_due_jobs_respects_telegram_notification_opt_out(self):
+        UserProfile.objects.create(user=self.creditor_user, telegram_id=111, telegram_chat_type='private')
+        UserProfile.objects.create(
+            user=self.borrower_user,
+            telegram_id=222,
+            telegram_chat_type='private',
+            payment_due_notifications=False,
+        )
+        series = EventSeries.objects.create(
+            obligation=self.obligation,
+            name='Rent',
+            day_of_month=1,
+            starts_on=date(2026, 1, 1),
+        )
+        EventSeriesVersion.objects.create(
+            event_series=series,
+            amount_units=1_000_000,
+            valid_from=date(2026, 1, 1),
+        )
+
+        with patch('ledger.services.notifications.send_telegram_message', return_value={'message_id': 1}) as send:
+            result = run_due_jobs(through_date=date(2026, 1, 1))
+
+        self.assertEqual(result.notifications_sent, 1)
+        send.assert_called_once()
+        self.assertEqual(send.call_args.args[0], 111)
+
+    def test_run_due_jobs_notification_shows_interest_amount(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=222, telegram_chat_type='private')
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        InterestRatePeriod.objects.create(
+            obligation=self.obligation,
+            annual_rate_percent=Decimal('12.0000'),
+            effective_from=date(2026, 1, 1),
+        )
+
+        with patch('ledger.services.notifications.send_telegram_message', return_value={'message_id': 1}) as send:
+            result = run_due_jobs(through_date=date(2026, 2, 1))
+
+        self.assertEqual(result.interest_posted, 1)
+        message_text = send.call_args.args[1]
+        self.assertIn('Scheduled amount: +$0.00', message_text)
+        self.assertIn('Interest amount: +$0.95', message_text)
+        self.assertIn('Change: +$0.95', message_text)
+
     def test_run_due_jobs_generates_due_recurring_and_interest_once(self):
         post_principal_advance(self.obligation, amount_units=3_650_000, event_date=date(2026, 1, 1))
         series = EventSeries.objects.create(
@@ -1908,6 +2002,7 @@ class ViewTests(LedgerTestCase):
         self.assertIsNone(profile.telegram_checked_at)
         self.assertTrue(profile.show_planner_module)
         self.assertFalse(profile.show_dashboard_balance_history)
+        self.assertTrue(profile.payment_due_notifications)
 
     def test_admin_profile_edit_updates_modules_without_changing_telegram(self):
         profile = UserProfile.objects.create(
@@ -1935,6 +2030,7 @@ class ViewTests(LedgerTestCase):
         self.assertIsNotNone(profile.telegram_checked_at)
         self.assertFalse(profile.show_planner_module)
         self.assertTrue(profile.show_dashboard_balance_history)
+        self.assertFalse(profile.payment_due_notifications)
 
     def test_admin_profile_edit_hides_telegram_id_until_change(self):
         profile = UserProfile.objects.create(
@@ -1954,6 +2050,7 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'data-field-name="telegram_id"')
         self.assertContains(response, 'id="modules-panel"')
         self.assertContains(response, 'data-field-name="show_planner_module"')
+        self.assertContains(response, 'data-field-name="payment_due_notifications"')
         self.assertContains(response, 'Planner')
         content = response.content.decode()
         self.assertLess(content.index('data-field-name="telegram_id"'), content.index('id="modules-panel"'))
@@ -2062,6 +2159,7 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'Telegram ID')
         self.assertContains(response, 'Modules')
         self.assertContains(response, 'Dashboard balance history')
+        self.assertContains(response, 'Telegram payment notifications')
         self.assertContains(response, 'Not connected')
         self.assertContains(response, 'id="password-form" class="form-grid setting-edit" method="post" hidden')
         self.assertContains(response, 'data-edit-target="password-form"')
@@ -2082,6 +2180,7 @@ class ViewTests(LedgerTestCase):
         profile = UserProfile.objects.get(user=self.borrower_user)
         self.assertFalse(profile.show_planner_module)
         self.assertTrue(profile.show_dashboard_balance_history)
+        self.assertFalse(profile.payment_due_notifications)
 
     def test_profile_page_updates_telegram_id(self):
         self.client.force_login(self.borrower_user)

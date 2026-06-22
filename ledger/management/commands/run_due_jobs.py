@@ -46,11 +46,16 @@ class Command(BaseCommand):
                 f'Due jobs through {result.through_date}: checked {result.obligation_count} open obligation(s), '
                 f'generated {result.recurring_created} recurring event(s), '
                 f'posted {result.interest_posted} interest month(s), '
-                f'with {result.error_count} error(s).'
+                f'sent {result.notifications_sent} notification(s), '
+                f'with {result.error_count} job error(s) and {result.notification_error_count} notification error(s).'
             )
         )
         for obligation_result in result.obligation_results:
             for error in obligation_result.errors:
                 self.stderr.write(
                     f'Obligation #{obligation_result.obligation_id} ({obligation_result.title}): {error}'
+                )
+            for error in obligation_result.notification_errors:
+                self.stderr.write(
+                    f'Obligation #{obligation_result.obligation_id} ({obligation_result.title}) notification: {error}'
                 )

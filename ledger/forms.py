@@ -69,14 +69,16 @@ class UserProfileForm(forms.ModelForm):
 class ModulePreferencesForm(forms.ModelForm):
     class Meta:
         model = UserProfile
-        fields = ['show_planner_module', 'show_dashboard_balance_history']
+        fields = ['show_planner_module', 'show_dashboard_balance_history', 'payment_due_notifications']
         labels = {
             'show_planner_module': 'Planner',
             'show_dashboard_balance_history': 'Dashboard balance history',
+            'payment_due_notifications': 'Telegram payment notifications',
         }
         help_texts = {
             'show_planner_module': 'Show Planner in the navigation bar.',
             'show_dashboard_balance_history': 'Show the Balance history chart on Dashboard.',
+            'payment_due_notifications': 'Send Telegram messages when due jobs change one of your obligation balances.',
         }
 
 
@@ -129,16 +131,18 @@ class AdminUserForm(forms.ModelForm):
 class AdminProfileForm(forms.ModelForm):
     class Meta:
         model = UserProfile
-        fields = ('telegram_id', 'show_planner_module', 'show_dashboard_balance_history')
+        fields = ('telegram_id', 'show_planner_module', 'show_dashboard_balance_history', 'payment_due_notifications')
         labels = {
             'telegram_id': 'Telegram ID',
             'show_planner_module': 'Planner',
             'show_dashboard_balance_history': 'Dashboard balance history',
+            'payment_due_notifications': 'Telegram payment notifications',
         }
         help_texts = {
             'telegram_id': 'Leave blank to disconnect Telegram for this profile.',
             'show_planner_module': 'Show Planner in this user navigation bar.',
             'show_dashboard_balance_history': 'Show the Balance history chart on this user dashboard.',
+            'payment_due_notifications': "Send Telegram messages when due jobs change this user's obligation balances.",
         }
         widgets = {
             'telegram_id': forms.NumberInput(attrs={'min': '1', 'step': '1'}),
@@ -171,14 +175,16 @@ class AdminProfileTelegramForm(forms.ModelForm):
 class AdminProfileModulesForm(forms.ModelForm):
     class Meta:
         model = UserProfile
-        fields = ('show_planner_module', 'show_dashboard_balance_history')
+        fields = ('show_planner_module', 'show_dashboard_balance_history', 'payment_due_notifications')
         labels = {
             'show_planner_module': 'Planner',
             'show_dashboard_balance_history': 'Dashboard balance history',
+            'payment_due_notifications': 'Telegram payment notifications',
         }
         help_texts = {
             'show_planner_module': 'Show Planner in this user navigation bar.',
             'show_dashboard_balance_history': 'Show the Balance history chart on this user dashboard.',
+            'payment_due_notifications': "Send Telegram messages when due jobs change this user's obligation balances.",
         }
 
 

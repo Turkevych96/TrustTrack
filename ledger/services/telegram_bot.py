@@ -117,6 +117,32 @@ TELEGRAM_TEXT = {
         LANG_EN: 'Language updated.',
         LANG_RU: 'Язык обновлён.',
     },
+    'settings_notifications': {
+        LANG_EN: 'Payment notifications',
+        LANG_RU: 'Уведомления о платежах',
+    },
+    'settings_notifications_current': {
+        LANG_EN: 'Payment notifications: {status}',
+        LANG_RU: 'Уведомления о платежах: {status}',
+    },
+    'settings_notifications_hint': {
+        LANG_EN: 'You will be notified when due jobs change an obligation balance.',
+        LANG_RU: 'Вы получите уведомление, когда плановые задачи изменят баланс обязательства.',
+    },
+    'settings_notifications_updated': {
+        LANG_EN: 'Notification settings updated.',
+        LANG_RU: 'Настройки уведомлений обновлены.',
+    },
+    'settings_notifications_enable': {
+        LANG_EN: 'Turn notifications on',
+        LANG_RU: 'Включить уведомления',
+    },
+    'settings_notifications_disable': {
+        LANG_EN: 'Turn notifications off',
+        LANG_RU: 'Отключить уведомления',
+    },
+    'settings_on': {LANG_EN: 'on', LANG_RU: 'включены'},
+    'settings_off': {LANG_EN: 'off', LANG_RU: 'отключены'},
     'processed': {LANG_EN: 'Processed', LANG_RU: 'Готово'},
     'language_english': {LANG_EN: 'English', LANG_RU: 'английский'},
     'language_russian': {LANG_EN: 'Russian', LANG_RU: 'русский'},
@@ -429,7 +455,11 @@ def _process_message(message, today, nonce_factory):
         return _single_message(chat_id, _balance_text(profile.user, lang), reply_markup=_main_menu_markup(lang=lang))
     if command in ('/settings', '/setting'):
         _clear_pending_context(telegram_user_id)
-        return _single_message(chat_id, _settings_text(profile.user, lang), reply_markup=_settings_markup(lang))
+        return _single_message(
+            chat_id,
+            _settings_text(profile.user, lang),
+            reply_markup=_settings_markup(profile, lang),
+        )
     if command in ('/new', '/newobligation'):
         return _single_message(chat_id, _new_obligation_role_text(lang), reply_markup=_new_obligation_role_markup(lang))
     if command in ('/debt', '/obligation'):
@@ -530,7 +560,7 @@ def _process_callback_query(callback_query, today, nonce_factory):
         )
     if data == 'menu:settings':
         return TelegramBotResult(
-            messages=[_panel_message(chat_id, message_id, _settings_text(profile.user, lang), _settings_markup(lang))],
+            messages=[_panel_message(chat_id, message_id, _settings_text(profile.user, lang), _settings_markup(profile, lang))],
             callback_query_id=callback_query_id,
             callback_text=_t(lang, 'settings_title'),
         )
@@ -544,9 +574,34 @@ def _process_callback_query(callback_query, today, nonce_factory):
         lang = requested_language
         _cache_user_language(profile.user, lang)
         return TelegramBotResult(
-            messages=[_panel_message(chat_id, message_id, _settings_text(profile.user, lang, updated=True), _settings_markup(lang))],
+            messages=[
+                _panel_message(
+                    chat_id,
+                    message_id,
+                    _settings_text(profile.user, lang, updated=True),
+                    _settings_markup(profile, lang),
+                )
+            ],
             callback_query_id=callback_query_id,
             callback_text=_t(lang, 'settings_language_updated'),
+        )
+    if data.startswith('settings:due:'):
+        requested_state = data.split(':', maxsplit=2)[2]
+        enabled = requested_state == 'on'
+        if profile.payment_due_notifications != enabled:
+            profile.payment_due_notifications = enabled
+            profile.save(update_fields=['payment_due_notifications', 'updated_at'])
+        return TelegramBotResult(
+            messages=[
+                _panel_message(
+                    chat_id,
+                    message_id,
+                    _settings_text(profile.user, lang, notification_updated=True),
+                    _settings_markup(profile, lang),
+                )
+            ],
+            callback_query_id=callback_query_id,
+            callback_text=_t(lang, 'settings_notifications_updated'),
         )
     if data == 'menu:new_obligation':
         _clear_pending_context(telegram_user_id)
@@ -691,26 +746,46 @@ def _help_text(user, lang=None):
     ])
 
 
-def _settings_text(user, lang=None, updated=False):
+def _settings_text(user, lang=None, updated=False, notification_updated=False):
     lang = lang or _language_for_user(user)
+    profile = UserProfile.objects.filter(user=user).first()
+    notifications_enabled = True if profile is None else profile.payment_due_notifications
+    notification_status = _t(lang, 'settings_on' if notifications_enabled else 'settings_off')
     lines = []
     if updated:
         lines.extend([_t(lang, 'settings_language_updated'), ''])
+    if notification_updated:
+        lines.extend([_t(lang, 'settings_notifications_updated'), ''])
     lines.extend([
         _t(lang, 'settings_title'),
         f'{_t(lang, "settings_current_language", language=_language_label(lang, lang))}',
+        _t(lang, 'settings_notifications_current', status=notification_status),
         '',
         _t(lang, 'settings_choose_language'),
+        _t(lang, 'settings_notifications_hint'),
     ])
     return '\n'.join(lines)
 
 
-def _settings_markup(lang):
+def _settings_markup(profile, lang):
+    notifications_enabled = profile.payment_due_notifications
+    next_notification_state = 'off' if notifications_enabled else 'on'
+    notification_button = (
+        'settings_notifications_disable'
+        if notifications_enabled
+        else 'settings_notifications_enable'
+    )
     return {
         'inline_keyboard': [
             [
                 {'text': _t(lang, 'language_english'), 'callback_data': f'settings:lang:{LANG_EN}'},
                 {'text': _t(lang, 'language_russian'), 'callback_data': f'settings:lang:{LANG_RU}'},
+            ],
+            [
+                {
+                    'text': _t(lang, notification_button),
+                    'callback_data': f'settings:due:{next_notification_state}',
+                }
             ],
             [{'text': _t(lang, 'home'), 'callback_data': 'menu:home'}],
         ],
