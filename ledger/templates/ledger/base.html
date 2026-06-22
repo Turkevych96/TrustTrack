@@ -110,9 +110,17 @@
         .main-side {
             grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
         }
-        .metrics {
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        .metrics-stack {
+            display: grid;
+            gap: 14px;
             margin-bottom: 22px;
+        }
+        .metrics {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin-bottom: 22px;
+        }
+        .metrics-stack .metrics {
+            margin-bottom: 0;
         }
         .admin-page {
             max-width: 1280px;

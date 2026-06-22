@@ -40,34 +40,39 @@
     {% endif %}
 </div>
 
-<section class="grid metrics">
-    <div class="panel">
-        <div class="metric-label">Current balance</div>
-        <div class="metric-value">{{ balance_units|money_units }}</div>
-    </div>
-    <div class="panel">
-        <div class="metric-label">Paid to date</div>
-        <div class="metric-value">{{ obligation_summary.paid_to_date_units|money_units }}</div>
-    </div>
-    <div class="panel">
-        <div class="metric-label">Principal/charges</div>
-        <div class="metric-value">{{ obligation_summary.principal_charges_units|money_units }}</div>
-    </div>
-    {% if obligation_summary.has_interest %}
+<div class="metrics-stack">
+    <section class="grid metrics" aria-label="Obligation status">
         <div class="panel">
-            <div class="metric-label">Interest accrued</div>
-            <div class="metric-value">{{ obligation_summary.interest_accrued_units|money_units }}</div>
+            <div class="metric-label">Current balance</div>
+            <div class="metric-value">{{ balance_units|money_units }}</div>
         </div>
-    {% endif %}
-    <div class="panel">
-        <div class="metric-label">Your role</div>
-        <div class="metric-value">{{ role }}</div>
-    </div>
-    <div class="panel">
-        <div class="metric-label">Status</div>
-        <div class="metric-value">{{ obligation.get_status_display }}</div>
-    </div>
-</section>
+        <div class="panel">
+            <div class="metric-label">Your role</div>
+            <div class="metric-value">{{ role }}</div>
+        </div>
+        <div class="panel">
+            <div class="metric-label">Status</div>
+            <div class="metric-value">{{ obligation.get_status_display }}</div>
+        </div>
+    </section>
+
+    <section class="grid metrics" aria-label="Obligation totals">
+        <div class="panel">
+            <div class="metric-label">Paid to date</div>
+            <div class="metric-value">{{ obligation_summary.paid_to_date_units|money_units }}</div>
+        </div>
+        <div class="panel">
+            <div class="metric-label">Principal/charges</div>
+            <div class="metric-value">{{ obligation_summary.principal_charges_units|money_units }}</div>
+        </div>
+        {% if obligation_summary.has_interest %}
+            <div class="panel">
+                <div class="metric-label">Interest accrued</div>
+                <div class="metric-value">{{ obligation_summary.interest_accrued_units|money_units }}</div>
+            </div>
+        {% endif %}
+    </section>
+</div>
 
 <section class="section-gap">
     <h2>Manual transfers</h2>
