@@ -91,8 +91,8 @@ def send_obligation_created_notification(obligation, initial_amount_units, recal
 
 def build_due_job_notification_messages(profile, items, max_message_length=TELEGRAM_MESSAGE_SAFE_LIMIT):
     if profile.telegram_language == UserProfile.TelegramLanguage.RUSSIAN:
-        return _digest_messages_ru(items, max_message_length)
-    return _digest_messages_en(items, max_message_length)
+        return _digest_messages_ru(profile, items, max_message_length)
+    return _digest_messages_en(profile, items, max_message_length)
 
 
 def _notification_items_by_profile(items):
@@ -201,61 +201,101 @@ def _obligation_created_notification_text_ru(
     return '\n'.join(lines)
 
 
-def _digest_messages_en(items, max_message_length):
-    header = _digest_header_en(items)
-    blocks = [_digest_item_block_en(item) for item in items]
+def _digest_messages_en(profile, items, max_message_length):
+    header = _digest_header_en(profile, items)
+    blocks = [_digest_item_block_en(profile, item) for item in items]
     footer = 'You can turn these notifications off in /settings.'
     return _chunk_digest(header, blocks, footer, max_message_length)
 
 
-def _digest_messages_ru(items, max_message_length):
-    header = _digest_header_ru(items)
-    blocks = [_digest_item_block_ru(item) for item in items]
+def _digest_messages_ru(profile, items, max_message_length):
+    header = _digest_header_ru(profile, items)
+    blocks = [_digest_item_block_ru(profile, item) for item in items]
     footer = 'Эти уведомления можно отключить в /settings.'
     return _chunk_digest(header, blocks, footer, max_message_length)
 
 
-def _digest_header_en(items):
-    return '\n'.join([
+def _digest_header_en(profile, items):
+    lines = [
         'TrustTrack balance updates',
         f'{len(items)} obligation(s) changed',
-        f'Total change: {_format_signed_money(_total_change_units(items))}',
-    ])
+    ]
+    borrower_change_units = _role_change_units(profile, items, 'borrower')
+    creditor_change_units = _role_change_units(profile, items, 'creditor')
+    if borrower_change_units:
+        lines.append(f'You owe change: {_format_signed_money(borrower_change_units)}')
+    if creditor_change_units:
+        lines.append(f'Owed to you change: {_format_signed_money(creditor_change_units)}')
+    if not borrower_change_units and not creditor_change_units:
+        lines.append('No balance change')
+    return '\n'.join(lines)
 
 
-def _digest_header_ru(items):
-    return '\n'.join([
+def _digest_header_ru(profile, items):
+    lines = [
         'Обновления баланса TrustTrack',
         f'Изменено обязательств: {len(items)}',
-        f'Общее изменение: {_format_signed_money(_total_change_units(items))}',
-    ])
+    ]
+    borrower_change_units = _role_change_units(profile, items, 'borrower')
+    creditor_change_units = _role_change_units(profile, items, 'creditor')
+    if borrower_change_units:
+        lines.append(f'Изменение вашего долга: {_format_signed_money(borrower_change_units)}')
+    if creditor_change_units:
+        lines.append(f'Изменение суммы, которую должны вам: {_format_signed_money(creditor_change_units)}')
+    if not borrower_change_units and not creditor_change_units:
+        lines.append('Изменений баланса нет')
+    return '\n'.join(lines)
 
 
-def _digest_item_block_en(item):
+def _digest_item_block_en(profile, item):
+    role = _item_role(profile, item)
+    if role == 'borrower':
+        type_label = 'You owe'
+        balance_label = 'You owe'
+        change_label = 'You owe change'
+        current_label = 'You owe now'
+    else:
+        type_label = 'Owed to you'
+        balance_label = 'Owed to you'
+        change_label = 'Owed to you change'
+        current_label = 'Owed to you now'
     lines = [
         item.obligation.title,
-        f'Balance: {_format_money(item.balance_before_units)} -> {_format_money(item.balance_after_units)}',
-        f'Change: {_format_signed_money(item.balance_change_units)}',
+        f'Type: {type_label}',
+        f'{balance_label}: {_format_money(item.balance_before_units)} -> {_format_money(item.balance_after_units)}',
+        f'{change_label}: {_format_signed_money(item.balance_change_units)}',
     ]
     if item.recurring_change_units:
         lines.append(f'Scheduled: {_format_signed_money(item.recurring_change_units)}')
     if item.interest_units:
         lines.append(f'Interest: {_format_signed_money(item.interest_units)}')
-    lines.append(f'Current: {_format_money(item.balance_after_units)}')
+    lines.append(f'{current_label}: {_format_money(item.balance_after_units)}')
     return '\n'.join(lines)
 
 
-def _digest_item_block_ru(item):
+def _digest_item_block_ru(profile, item):
+    role = _item_role(profile, item)
+    if role == 'borrower':
+        type_label = 'Вы должны'
+        balance_label = 'Ваш долг'
+        change_label = 'Изменение вашего долга'
+        current_label = 'Ваш долг сейчас'
+    else:
+        type_label = 'Вам должны'
+        balance_label = 'Вам должны'
+        change_label = 'Изменение суммы, которую должны вам'
+        current_label = 'Вам должны сейчас'
     lines = [
         item.obligation.title,
-        f'Баланс: {_format_money(item.balance_before_units)} -> {_format_money(item.balance_after_units)}',
-        f'Изменение: {_format_signed_money(item.balance_change_units)}',
+        f'Тип: {type_label}',
+        f'{balance_label}: {_format_money(item.balance_before_units)} -> {_format_money(item.balance_after_units)}',
+        f'{change_label}: {_format_signed_money(item.balance_change_units)}',
     ]
     if item.recurring_change_units:
         lines.append(f'Плановое: {_format_signed_money(item.recurring_change_units)}')
     if item.interest_units:
         lines.append(f'Проценты: {_format_signed_money(item.interest_units)}')
-    lines.append(f'Текущий: {_format_money(item.balance_after_units)}')
+    lines.append(f'{current_label}: {_format_money(item.balance_after_units)}')
     return '\n'.join(lines)
 
 
@@ -289,8 +329,18 @@ def _with_part_label(message, part_number, part_count):
     return '\n'.join([f'{first_line} ({part_number}/{part_count})', *remaining_lines])
 
 
-def _total_change_units(items):
-    return sum(item.balance_change_units for item in items)
+def _role_change_units(profile, items, role):
+    return sum(
+        item.balance_change_units
+        for item in items
+        if _item_role(profile, item) == role
+    )
+
+
+def _item_role(profile, item):
+    if item.obligation.borrower_id == profile.user_id:
+        return 'borrower'
+    return 'creditor'
 
 
 def _recurring_balance_change_units(created_transactions):

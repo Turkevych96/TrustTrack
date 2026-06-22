@@ -1282,17 +1282,31 @@ class DueJobTests(LedgerTestCase):
         self.assertEqual(second_result.notifications_sent, 0)
         self.assertEqual(send.call_count, 2)
         self.assertEqual({call.args[0] for call in send.call_args_list}, {111, 222})
-        message_text = send.call_args_list[0].args[1]
-        self.assertIn('TrustTrack balance updates', message_text)
-        self.assertIn('2 obligation(s) changed', message_text)
-        self.assertIn('Total change: +$150.00', message_text)
-        self.assertIn('Test loan', message_text)
-        self.assertIn('Balance: $0.00 -> $100.00', message_text)
-        self.assertIn('Scheduled: +$100.00', message_text)
-        self.assertIn('Utilities', message_text)
-        self.assertIn('Balance: $0.00 -> $50.00', message_text)
-        self.assertIn('Scheduled: +$50.00', message_text)
-        self.assertIn('/settings', message_text)
+        messages_by_chat = {call.args[0]: call.args[1] for call in send.call_args_list}
+        creditor_message = messages_by_chat[111]
+        borrower_message = messages_by_chat[222]
+
+        self.assertIn('TrustTrack balance updates', creditor_message)
+        self.assertIn('2 obligation(s) changed', creditor_message)
+        self.assertIn('Owed to you change: +$150.00', creditor_message)
+        self.assertIn('Test loan', creditor_message)
+        self.assertIn('Type: Owed to you', creditor_message)
+        self.assertIn('Owed to you: $0.00 -> $100.00', creditor_message)
+        self.assertIn('Scheduled: +$100.00', creditor_message)
+        self.assertIn('Utilities', creditor_message)
+        self.assertIn('Owed to you: $0.00 -> $50.00', creditor_message)
+        self.assertIn('Scheduled: +$50.00', creditor_message)
+        self.assertIn('/settings', creditor_message)
+
+        self.assertIn('TrustTrack balance updates', borrower_message)
+        self.assertIn('2 obligation(s) changed', borrower_message)
+        self.assertIn('You owe change: +$150.00', borrower_message)
+        self.assertIn('Test loan', borrower_message)
+        self.assertIn('Type: You owe', borrower_message)
+        self.assertIn('You owe: $0.00 -> $100.00', borrower_message)
+        self.assertIn('Utilities', borrower_message)
+        self.assertIn('You owe: $0.00 -> $50.00', borrower_message)
+        self.assertIn('/settings', borrower_message)
 
     def test_run_due_jobs_respects_telegram_notification_opt_out(self):
         UserProfile.objects.create(user=self.creditor_user, telegram_id=111, telegram_chat_type='private')
@@ -1337,7 +1351,7 @@ class DueJobTests(LedgerTestCase):
         message_text = send.call_args.args[1]
         self.assertNotIn('Scheduled:', message_text)
         self.assertIn('Interest: +$0.95', message_text)
-        self.assertIn('Change: +$0.95', message_text)
+        self.assertIn('You owe change: +$0.95', message_text)
 
     def test_due_job_notification_digest_splits_long_messages(self):
         profile = UserProfile.objects.create(user=self.borrower_user, telegram_id=222)
