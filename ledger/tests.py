@@ -10,7 +10,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from django.urls import reverse
 
@@ -45,6 +45,16 @@ from ledger.services.recurring import (
 from ledger.services.telegram import TelegramChatIdentity, TelegramLookupError
 from ledger.services.telegram_bot import PENDING_OBLIGATION_CREATIONS, PENDING_REPAYMENT_OBLIGATIONS, process_telegram_update
 from ledger.templatetags.money import money_units
+
+
+TEST_STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+    },
+}
 
 
 class LedgerTestCase(TestCase):
@@ -1503,6 +1513,39 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, f'DELETE {self.obligation.pk}')
         self.assertContains(response, 'class="filter-bar"')
         self.assertNotContains(response, reverse('ledger:obligation_create'))
+
+    @override_settings(STORAGES=TEST_STORAGES)
+    def test_django_admin_obligation_form_hides_internal_ledger_fields(self):
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+        admin_user = get_user_model().objects.create_superuser(username='admin', password='admin-pass')
+        self.client.force_login(admin_user)
+
+        response = self.client.get(reverse('admin:ledger_obligation_change', kwargs={'object_id': self.obligation.pk}))
+
+        self.assertContains(response, 'Creditor is the person who is owed money.')
+        self.assertContains(response, 'People')
+        self.assertContains(response, 'Obligation')
+        self.assertNotContains(response, 'Ledger accounts')
+        self.assertNotContains(response, 'Add another Ledger account')
+        self.assertNotContains(response, 'Currency exponent')
+        self.assertNotContains(response, 'name="currency"')
+
+    @override_settings(STORAGES=TEST_STORAGES)
+    def test_django_admin_ledger_index_hides_internal_accounting_models(self):
+        admin_user = get_user_model().objects.create_superuser(username='admin', password='admin-pass')
+        self.client.force_login(admin_user)
+
+        response = self.client.get(reverse('admin:app_list', kwargs={'app_label': 'ledger'}))
+
+        self.assertContains(response, 'Obligations')
+        self.assertContains(response, 'Interest rate periods')
+        self.assertNotContains(response, 'Ledger accounts')
+        self.assertNotContains(response, 'Ledger entries')
+        self.assertNotContains(response, 'Ledger transactions')
+        self.assertNotContains(response, 'Financial events')
+        self.assertNotContains(response, 'Interest accrual runs')
+        self.assertNotContains(response, 'Event series versions')
+        self.assertNotContains(response, 'Audit events')
 
     def test_admin_obligations_page_is_staff_only(self):
         self.client.force_login(self.borrower_user)
