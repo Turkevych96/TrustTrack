@@ -22,6 +22,7 @@ from ledger.models import (
 from ledger.services.balances import get_obligation_balance
 from ledger.services.events import post_principal_advance, post_repayment
 from ledger.services.money import decimal_from_units, units_from_decimal
+from ledger.services.notifications import send_obligation_created_notification
 from ledger.services.recalculation import recalculate_obligation
 
 
@@ -118,16 +119,16 @@ TELEGRAM_TEXT = {
         LANG_RU: 'Язык обновлён.',
     },
     'settings_notifications': {
-        LANG_EN: 'Payment notifications',
-        LANG_RU: 'Уведомления о платежах',
+        LANG_EN: 'Balance notifications',
+        LANG_RU: 'Уведомления о балансе',
     },
     'settings_notifications_current': {
-        LANG_EN: 'Payment notifications: {status}',
-        LANG_RU: 'Уведомления о платежах: {status}',
+        LANG_EN: 'Balance notifications: {status}',
+        LANG_RU: 'Уведомления о балансе: {status}',
     },
     'settings_notifications_hint': {
-        LANG_EN: 'You will be notified when due jobs change an obligation balance.',
-        LANG_RU: 'Вы получите уведомление, когда плановые задачи изменят баланс обязательства.',
+        LANG_EN: 'You will be notified when obligations are opened or due jobs change balances.',
+        LANG_RU: 'Вы получите уведомление, когда обязательства создаются или плановые задачи меняют баланс.',
     },
     'settings_notifications_updated': {
         LANG_EN: 'Notification settings updated.',
@@ -1250,7 +1251,8 @@ def _create_obligation_from_context(user, context, lang=LANG_EN):
         )
         _create_recurring_series_from_context(obligation, context)
         _create_interest_rate_from_context(obligation, context)
-        recalculate_obligation(obligation)
+        recalculation_result = recalculate_obligation(obligation)
+    send_obligation_created_notification(obligation, context['amount_units'], recalculation_result)
     return obligation
 
 

@@ -222,7 +222,7 @@ class TelegramBotTests(LedgerTestCase):
         )
 
         self.assertIn('Settings', settings.messages[0].text)
-        self.assertIn('Payment notifications: on', settings.messages[0].text)
+        self.assertIn('Balance notifications: on', settings.messages[0].text)
         self.assertEqual(
             settings.messages[0].reply_markup['inline_keyboard'][0],
             [
@@ -257,9 +257,9 @@ class TelegramBotTests(LedgerTestCase):
         profile.refresh_from_db()
 
         self.assertIn('Notification settings updated', disabled.messages[0].text)
-        self.assertIn('Payment notifications: off', disabled.messages[0].text)
+        self.assertIn('Balance notifications: off', disabled.messages[0].text)
         self.assertEqual(disabled.messages[0].reply_markup['inline_keyboard'][1][0]['text'], 'Turn notifications on')
-        self.assertIn('Payment notifications: on', enabled.messages[0].text)
+        self.assertIn('Balance notifications: on', enabled.messages[0].text)
         self.assertTrue(profile.payment_due_notifications)
 
     def test_russian_language_localizes_telegram_panels(self):
@@ -2208,7 +2208,7 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'Telegram ID')
         self.assertContains(response, 'Modules')
         self.assertContains(response, 'Dashboard balance history')
-        self.assertContains(response, 'Telegram payment notifications')
+        self.assertContains(response, 'Telegram balance notifications')
         self.assertContains(response, 'Not connected')
         self.assertContains(response, 'id="password-form" class="form-grid setting-edit" method="post" hidden')
         self.assertContains(response, 'data-edit-target="password-form"')
@@ -2855,6 +2855,52 @@ class ViewTests(LedgerTestCase):
         self.assertEqual(rate.annual_rate_percent, Decimal('3.5000'))
         self.assertEqual(rate.effective_from, date(2026, 2, 1))
         self.assertEqual(rate.memo, 'With rate')
+
+    def test_create_obligation_sends_notification_after_recalculation(self):
+        user_model = get_user_model()
+        counterparty = user_model.objects.create_user(username='maria', first_name='Maria')
+        UserProfile.objects.create(user=self.creditor_user, telegram_id=111, telegram_chat_type='private')
+        UserProfile.objects.create(user=counterparty, telegram_id=222, telegram_chat_type='private')
+        self.client.force_login(self.creditor_user)
+
+        with (
+            patch('ledger.services.recalculation.timezone.localdate', return_value=date(2026, 3, 15)),
+            patch('ledger.services.notifications.send_telegram_message', return_value={'message_id': 1}) as send,
+        ):
+            response = self.client.post(
+                reverse('ledger:obligation_create'),
+                {
+                    'role': 'lent',
+                    'counterparty': counterparty.pk,
+                    'title': 'Backdated rent',
+                    'category': '',
+                    'payment_mode': 'recurring',
+                    'opened_on': '2026-01-01',
+                    'amount': '100.00',
+                    'recurring_frequency': EventSeries.Frequency.MONTHLY,
+                    'recurring_day_of_month': '1',
+                    'recurring_day_of_week': '',
+                    'recurring_starts_on': '2026-01-01',
+                    'recurring_ends_on': '',
+                    'has_interest': 'on',
+                    'annual_rate_percent': '12',
+                    'memo': 'Created in the past',
+                },
+            )
+
+        obligation = Obligation.objects.get(title='Backdated rent')
+        self.assertRedirects(response, reverse('ledger:obligation_detail', kwargs={'pk': obligation.pk}))
+        self.assertEqual(send.call_count, 2)
+        self.assertEqual({call.args[0] for call in send.call_args_list}, {111, 222})
+        message_text = send.call_args_list[0].args[1]
+        self.assertIn('New TrustTrack obligation', message_text)
+        self.assertIn('Backdated rent', message_text)
+        self.assertIn('Borrower: Maria', message_text)
+        self.assertIn('Creditor: Alex', message_text)
+        self.assertIn('Initial amount: $100.00', message_text)
+        self.assertIn('Generated scheduled: +$300.00', message_text)
+        self.assertIn('Generated interest:', message_text)
+        self.assertIn('Current balance:', message_text)
 
     def test_create_recurring_obligation_requires_matching_schedule_day(self):
         user_model = get_user_model()

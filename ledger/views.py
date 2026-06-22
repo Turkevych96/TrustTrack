@@ -55,6 +55,7 @@ from ledger.services.events import edit_manual_transfer, post_principal_advance,
 from ledger.services.history import build_balance_history
 from ledger.services.interest import generate_due_interest, recalculate_interest_from
 from ledger.services.money import decimal_from_units
+from ledger.services.notifications import send_obligation_created_notification
 from ledger.services.planner import build_portfolio_projection, simulate_monthly_payment
 from ledger.services.recalculation import recalculate_obligation
 from ledger.services.recurring import generate_due_recurring_events, recalculate_due_recurring_events
@@ -937,7 +938,8 @@ def obligation_create(request):
                     )
                     form.save_recurring_series(obligation)
                     form.save_interest_rate(obligation)
-                    recalculate_obligation(obligation)
+                    recalculation_result = recalculate_obligation(obligation)
+                send_obligation_created_notification(obligation, form.amount_units, recalculation_result)
                 return redirect('ledger:obligation_detail', pk=obligation.pk)
             except ValidationError as error:
                 form.add_error(None, error)

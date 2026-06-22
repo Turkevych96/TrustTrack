@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from django.db.models import Q
 
 from ledger.models import UserProfile
+from ledger.services.balances import get_obligation_balance
 from ledger.services.money import decimal_from_units
 from ledger.services.telegram import TelegramLookupError, send_telegram_message
 
@@ -61,6 +62,33 @@ def send_due_job_notifications(items):
     return result
 
 
+def send_obligation_created_notification(obligation, initial_amount_units, recalculation_result=None):
+    result = NotificationSendResult()
+    profiles = _notification_profiles_for_obligation(obligation)
+    if not profiles:
+        return result
+
+    current_balance_units = get_obligation_balance(obligation)
+    recurring_change_units = _recurring_change_from_recalculation(recalculation_result)
+    interest_units = _interest_from_recalculation(recalculation_result)
+    for profile in profiles:
+        text = _obligation_created_notification_text(
+            profile,
+            obligation,
+            initial_amount_units,
+            current_balance_units,
+            recurring_change_units,
+            interest_units,
+        )
+        try:
+            send_telegram_message(profile.telegram_id, text)
+        except TelegramLookupError as error:
+            result.errors.append(f'{profile.user}: {error}')
+        else:
+            result.sent += 1
+    return result
+
+
 def build_due_job_notification_messages(profile, items, max_message_length=TELEGRAM_MESSAGE_SAFE_LIMIT):
     if profile.telegram_language == UserProfile.TelegramLanguage.RUSSIAN:
         return _digest_messages_ru(items, max_message_length)
@@ -92,6 +120,85 @@ def _notification_profiles_for_obligation(obligation):
         .filter(Q(telegram_chat_type='') | Q(telegram_chat_type='private'))
         .order_by('user_id')
     )
+
+
+def _obligation_created_notification_text(
+    profile,
+    obligation,
+    initial_amount_units,
+    current_balance_units,
+    recurring_change_units,
+    interest_units,
+):
+    if profile.telegram_language == UserProfile.TelegramLanguage.RUSSIAN:
+        return _obligation_created_notification_text_ru(
+            obligation,
+            initial_amount_units,
+            current_balance_units,
+            recurring_change_units,
+            interest_units,
+        )
+    return _obligation_created_notification_text_en(
+        obligation,
+        initial_amount_units,
+        current_balance_units,
+        recurring_change_units,
+        interest_units,
+    )
+
+
+def _obligation_created_notification_text_en(
+    obligation,
+    initial_amount_units,
+    current_balance_units,
+    recurring_change_units,
+    interest_units,
+):
+    lines = [
+        'New TrustTrack obligation',
+        obligation.title,
+        f'Borrower: {_user_label(obligation.borrower)}',
+        f'Creditor: {_user_label(obligation.creditor)}',
+        f'Opened: {obligation.opened_on:%m/%d/%Y}',
+        f'Initial amount: {_format_money(initial_amount_units)}',
+    ]
+    if recurring_change_units:
+        lines.append(f'Generated scheduled: {_format_signed_money(recurring_change_units)}')
+    if interest_units:
+        lines.append(f'Generated interest: {_format_signed_money(interest_units)}')
+    lines.extend([
+        f'Current balance: {_format_money(current_balance_units)}',
+        '',
+        'You can turn these notifications off in /settings.',
+    ])
+    return '\n'.join(lines)
+
+
+def _obligation_created_notification_text_ru(
+    obligation,
+    initial_amount_units,
+    current_balance_units,
+    recurring_change_units,
+    interest_units,
+):
+    lines = [
+        'Новое обязательство TrustTrack',
+        obligation.title,
+        f'Заёмщик: {_user_label(obligation.borrower)}',
+        f'Кредитор: {_user_label(obligation.creditor)}',
+        f'Открыто: {obligation.opened_on:%m/%d/%Y}',
+        f'Начальная сумма: {_format_money(initial_amount_units)}',
+    ]
+    if recurring_change_units:
+        lines.append(f'Сгенерировано плановое: {_format_signed_money(recurring_change_units)}')
+    if interest_units:
+        lines.append(f'Сгенерированы проценты: {_format_signed_money(interest_units)}')
+    lines.extend([
+        f'Текущий баланс: {_format_money(current_balance_units)}',
+        '',
+        'Эти уведомления можно отключить в /settings.',
+    ])
+    return '\n'.join(lines)
 
 
 def _digest_messages_en(items, max_message_length):
@@ -199,6 +306,24 @@ def _recurring_balance_change_units(created_transactions):
 
 def _interest_amount_units(posted_runs):
     return sum(run.calculated_interest_amount_units for run in posted_runs)
+
+
+def _recurring_change_from_recalculation(recalculation_result):
+    if not recalculation_result:
+        return 0
+    recurring_result = recalculation_result.get('recurring') or {}
+    return _recurring_balance_change_units(recurring_result.get('created_transactions') or [])
+
+
+def _interest_from_recalculation(recalculation_result):
+    if not recalculation_result:
+        return 0
+    interest_result = recalculation_result.get('interest') or {}
+    return _interest_amount_units(interest_result.get('posted_runs') or [])
+
+
+def _user_label(user):
+    return user.get_full_name() or user.get_username()
 
 
 def _format_money(amount_units):

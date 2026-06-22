@@ -73,12 +73,12 @@ class ModulePreferencesForm(forms.ModelForm):
         labels = {
             'show_planner_module': 'Planner',
             'show_dashboard_balance_history': 'Dashboard balance history',
-            'payment_due_notifications': 'Telegram payment notifications',
+            'payment_due_notifications': 'Telegram balance notifications',
         }
         help_texts = {
             'show_planner_module': 'Show Planner in the navigation bar.',
             'show_dashboard_balance_history': 'Show the Balance history chart on Dashboard.',
-            'payment_due_notifications': 'Send Telegram messages when due jobs change one of your obligation balances.',
+            'payment_due_notifications': 'Send Telegram messages when obligations are opened or due jobs change balances.',
         }
 
 
@@ -136,13 +136,13 @@ class AdminProfileForm(forms.ModelForm):
             'telegram_id': 'Telegram ID',
             'show_planner_module': 'Planner',
             'show_dashboard_balance_history': 'Dashboard balance history',
-            'payment_due_notifications': 'Telegram payment notifications',
+            'payment_due_notifications': 'Telegram balance notifications',
         }
         help_texts = {
             'telegram_id': 'Leave blank to disconnect Telegram for this profile.',
             'show_planner_module': 'Show Planner in this user navigation bar.',
             'show_dashboard_balance_history': 'Show the Balance history chart on this user dashboard.',
-            'payment_due_notifications': "Send Telegram messages when due jobs change this user's obligation balances.",
+            'payment_due_notifications': "Send Telegram messages when this user's obligations are opened or due jobs change balances.",
         }
         widgets = {
             'telegram_id': forms.NumberInput(attrs={'min': '1', 'step': '1'}),
@@ -179,12 +179,12 @@ class AdminProfileModulesForm(forms.ModelForm):
         labels = {
             'show_planner_module': 'Planner',
             'show_dashboard_balance_history': 'Dashboard balance history',
-            'payment_due_notifications': 'Telegram payment notifications',
+            'payment_due_notifications': 'Telegram balance notifications',
         }
         help_texts = {
             'show_planner_module': 'Show Planner in this user navigation bar.',
             'show_dashboard_balance_history': 'Show the Balance history chart on this user dashboard.',
-            'payment_due_notifications': "Send Telegram messages when due jobs change this user's obligation balances.",
+            'payment_due_notifications': "Send Telegram messages when this user's obligations are opened or due jobs change balances.",
         }
 
 
