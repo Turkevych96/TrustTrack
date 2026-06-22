@@ -201,15 +201,19 @@ class CreateObligationForm(MoneyForm):
     PAYMENT_MODE_RECURRING = 'recurring'
 
     ROLE_CHOICES = (
-        (ROLE_LENT, 'I lent money'),
-        (ROLE_BORROWED, 'I borrowed money'),
+        (ROLE_LENT, 'Creditor'),
+        (ROLE_BORROWED, 'Borrower'),
     )
     PAYMENT_MODE_CHOICES = (
         (PAYMENT_MODE_ONE_TIME, 'One-time payment'),
         (PAYMENT_MODE_RECURRING, 'Recurring payment'),
     )
 
-    role = forms.ChoiceField(choices=ROLE_CHOICES)
+    role = forms.ChoiceField(
+        label='Your role',
+        choices=ROLE_CHOICES,
+        help_text='Choose Creditor when the other person owes you. Choose Borrower when you owe them.',
+    )
     counterparty = UserChoiceField(queryset=get_user_model().objects.none())
     title = forms.CharField(max_length=160)
     category = forms.ModelChoiceField(queryset=ObligationCategory.objects.none(), required=False)

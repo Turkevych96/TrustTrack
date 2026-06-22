@@ -264,7 +264,7 @@ class TelegramBotTests(LedgerTestCase):
             obligations.messages[0].reply_markup['inline_keyboard'][-2],
             [{'text': 'Новое обязательство', 'callback_data': 'menu:new_obligation'}],
         )
-        self.assertIn('Роль: заёмщик', detail.messages[0].text)
+        self.assertIn('Ваша роль: заёмщик', detail.messages[0].text)
         self.assertIn('Текущий баланс: $75.00', detail.messages[0].text)
         self.assertEqual(
             detail.messages[0].reply_markup['inline_keyboard'][0][0],
@@ -322,7 +322,11 @@ class TelegramBotTests(LedgerTestCase):
         interest = process_telegram_update(self._telegram_callback('newob:interest:no', telegram_id=555))
         created = process_telegram_update(self._telegram_callback('newob:create', telegram_id=555))
 
-        self.assertIn('Who are you', start.messages[0].text)
+        self.assertIn('Choose your role', start.messages[0].text)
+        self.assertEqual(
+            [row[0]['text'] for row in start.messages[0].reply_markup['inline_keyboard'][:2]],
+            ['Creditor', 'Borrower'],
+        )
         self.assertIn('Who borrowed from you', role.messages[0].text)
         self.assertIn('Send title', counterparty.messages[0].text)
         self.assertIn('Send initial amount', title.messages[0].text)
@@ -2541,6 +2545,18 @@ class ViewTests(LedgerTestCase):
         self.assertNotContains(response, 'Generate due recurring events')
         self.assertNotContains(response, 'Generate due interest')
         self.assertNotContains(response, 'Stop tracking')
+
+    def test_create_obligation_form_uses_explicit_role_labels(self):
+        self.client.force_login(self.creditor_user)
+
+        response = self.client.get(reverse('ledger:obligation_create'))
+
+        self.assertContains(response, 'Your role')
+        self.assertContains(response, '>Creditor</option>')
+        self.assertContains(response, '>Borrower</option>')
+        self.assertContains(response, 'Choose Creditor when the other person owes you.')
+        self.assertNotContains(response, 'I lent money')
+        self.assertNotContains(response, 'I borrowed money')
 
     def test_create_obligation_posts_initial_principal(self):
         user_model = get_user_model()
