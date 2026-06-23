@@ -45,7 +45,14 @@ from ledger.services.recurring import (
     recalculate_due_recurring_events,
 )
 from ledger.services.telegram import TelegramChatIdentity, TelegramLookupError
-from ledger.services.telegram_bot import PENDING_OBLIGATION_CREATIONS, PENDING_REPAYMENT_OBLIGATIONS, process_telegram_update
+from ledger.services.telegram_bot import (
+    PENDING_OBLIGATION_CREATIONS,
+    PENDING_REPAYMENT_OBLIGATIONS,
+    TelegramBotResult,
+    TelegramMessageDelete,
+    TelegramOutgoingMessage,
+    process_telegram_update,
+)
 from ledger.templatetags.money import money_units
 
 
@@ -412,8 +419,8 @@ class TelegramBotTests(LedgerTestCase):
         start = process_telegram_update(self._telegram_callback('menu:new_obligation', telegram_id=555))
         role = process_telegram_update(self._telegram_callback('newob:role:lent', telegram_id=555))
         counterparty = process_telegram_update(self._telegram_callback(f'newob:cp:{self.creditor_user.pk}', telegram_id=555))
-        title = process_telegram_update(self._telegram_message('Phone', telegram_id=555))
-        amount = process_telegram_update(self._telegram_message('125,00', telegram_id=555))
+        title = process_telegram_update(self._telegram_message('Phone', telegram_id=555, message_id=201))
+        amount = process_telegram_update(self._telegram_message('125,00', telegram_id=555, message_id=202))
         opened = process_telegram_update(
             self._telegram_callback('newob:date:today', telegram_id=555),
             today=date(2026, 1, 10),
@@ -428,13 +435,21 @@ class TelegramBotTests(LedgerTestCase):
             ['Creditor', 'Borrower'],
         )
         self.assertIn('Who borrowed from you', role.messages[0].text)
+        self.assertIn('Your role: Creditor', role.messages[0].text)
         self.assertIn('Send title', counterparty.messages[0].text)
+        self.assertIn('Counterparty: Alex', counterparty.messages[0].text)
         self.assertIn('Send initial amount', title.messages[0].text)
+        self.assertIn('Title: Phone', title.messages[0].text)
+        self.assertEqual(title.delete_messages, [TelegramMessageDelete(555, 201)])
         self.assertIn('Choose opened date', amount.messages[0].text)
+        self.assertIn('Amount: $125.00', amount.messages[0].text)
+        self.assertEqual(amount.delete_messages, [TelegramMessageDelete(555, 202)])
         self.assertIn('Choose payment schedule', opened.messages[0].text)
         self.assertIn('Opened: 01/10/2026', opened.messages[0].text)
         self.assertIn('Add interest', schedule.messages[0].text)
+        self.assertIn('Schedule: One-time payment', schedule.messages[0].text)
         self.assertIn('Create obligation?', interest.messages[0].text)
+        self.assertIn('Interest: No', interest.messages[0].text)
         self.assertIn('Obligation created', created.messages[0].text)
 
         obligation = Obligation.objects.get(title='Phone')
@@ -476,13 +491,14 @@ class TelegramBotTests(LedgerTestCase):
         process_telegram_update(self._telegram_callback('newob:schedule:monthly', telegram_id=555))
         process_telegram_update(self._telegram_callback('newob:dom:1', telegram_id=555))
         process_telegram_update(self._telegram_callback('newob:interest:yes', telegram_id=555))
-        confirmation = process_telegram_update(self._telegram_message('3,5', telegram_id=555))
+        confirmation = process_telegram_update(self._telegram_message('3,5', telegram_id=555, message_id=303))
         created = process_telegram_update(self._telegram_callback('newob:create', telegram_id=555))
 
         obligation = Obligation.objects.get(title='Telegram rent')
         series = EventSeries.objects.get(obligation=obligation)
         rate = InterestRatePeriod.objects.get(obligation=obligation)
         self.assertIn('3.5% APY', confirmation.messages[0].text)
+        self.assertEqual(confirmation.delete_messages, [TelegramMessageDelete(555, 303)])
         self.assertIn('Obligation created', created.messages[0].text)
         self.assertEqual(obligation.creditor, self.creditor_user)
         self.assertEqual(obligation.borrower, self.borrower_user)
@@ -748,9 +764,29 @@ class TelegramBotTests(LedgerTestCase):
         self.assertIn('private chat', result.messages[0].text)
         self.assertNotIn(self.obligation.title, result.messages[0].text)
 
-    def _telegram_message(self, text, telegram_id=555, chat_id=None, chat_type='private'):
+    def test_telegram_bot_command_deletes_requested_messages(self):
+        update = self._telegram_message('Phone', telegram_id=555, message_id=77)
+        update['update_id'] = 1
+        result = TelegramBotResult(
+            messages=[TelegramOutgoingMessage(555, 'Accepted')],
+            delete_messages=[TelegramMessageDelete(555, 77)],
+        )
+
+        with (
+            patch('ledger.management.commands.telegram_bot.get_telegram_updates', return_value=[update]),
+            patch('ledger.management.commands.telegram_bot.process_telegram_update', return_value=result),
+            patch('ledger.management.commands.telegram_bot.send_telegram_message') as send_message,
+            patch('ledger.management.commands.telegram_bot.delete_telegram_message') as delete_message,
+        ):
+            call_command('telegram_bot', '--once', stdout=StringIO())
+
+        send_message.assert_called_once_with(555, 'Accepted', reply_markup=None)
+        delete_message.assert_called_once_with(555, 77)
+
+    def _telegram_message(self, text, telegram_id=555, chat_id=None, chat_type='private', message_id=77):
         return {
             'message': {
+                'message_id': message_id,
                 'chat': {
                     'id': telegram_id if chat_id is None else chat_id,
                     'type': chat_type,

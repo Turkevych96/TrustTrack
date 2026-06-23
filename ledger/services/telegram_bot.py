@@ -434,8 +434,15 @@ class TelegramOutgoingMessage:
 
 
 @dataclass(frozen=True)
+class TelegramMessageDelete:
+    chat_id: int
+    message_id: int
+
+
+@dataclass(frozen=True)
 class TelegramBotResult:
     messages: list[TelegramOutgoingMessage] = field(default_factory=list)
+    delete_messages: list[TelegramMessageDelete] = field(default_factory=list)
     callback_query_id: str = ''
     callback_text: str = ''
 
@@ -456,6 +463,7 @@ def _process_message(message, today, nonce_factory):
     from_user = message.get('from') or {}
     chat_id = chat.get('id')
     telegram_user_id = from_user.get('id')
+    message_id = message.get('message_id')
 
     if not chat_id or not telegram_user_id:
         return TelegramBotResult()
@@ -484,6 +492,7 @@ def _process_message(message, today, nonce_factory):
             profile.user,
             telegram_user_id,
             chat_id,
+            message_id,
             text,
             today,
             lang,
@@ -1273,7 +1282,7 @@ def _new_obligation_callback_response(user, telegram_user_id, data, chat_id, mes
             return _t(lang, 'choose_counterparty'), _new_obligation_counterparty_markup(user, lang)
         context['counterparty_id'] = counterparty.pk
         context['step'] = 'title'
-        return _new_obligation_title_text(context, counterparty, lang), _new_obligation_cancel_markup(lang)
+        return _new_obligation_title_text(context, lang), _new_obligation_cancel_markup(lang)
 
     if action == 'date' and len(parts) == 3:
         if parts[2] == 'today':
@@ -1282,8 +1291,8 @@ def _new_obligation_callback_response(user, telegram_user_id, data, chat_id, mes
             return _new_obligation_schedule_text(context, lang), _new_obligation_schedule_markup(lang)
         if parts[2] == 'custom':
             context['step'] = 'opened_on'
-            return _t(lang, 'send_opened_date'), _new_obligation_cancel_markup(lang)
-        return _t(lang, 'choose_date_option'), _new_obligation_date_markup(lang)
+            return _new_obligation_opened_date_text(context, lang), _new_obligation_cancel_markup(lang)
+        return _new_obligation_step_text(context, _t(lang, 'choose_date_option'), lang), _new_obligation_date_markup(lang)
 
     if action == 'schedule' and len(parts) == 3:
         return _new_obligation_schedule_callback(context, parts[2], lang)
@@ -1305,8 +1314,8 @@ def _new_obligation_callback_response(user, telegram_user_id, data, chat_id, mes
         if parts[2] == 'yes':
             context['has_interest'] = True
             context['step'] = 'interest_rate'
-            return _t(lang, 'send_interest_rate'), _new_obligation_cancel_markup(lang)
-        return _t(lang, 'interest_option_error'), _new_obligation_interest_markup(lang)
+            return _new_obligation_interest_rate_text(context, lang), _new_obligation_cancel_markup(lang)
+        return _new_obligation_step_text(context, _t(lang, 'interest_option_error'), lang), _new_obligation_interest_markup(lang)
 
     if action == 'create':
         try:
@@ -1319,7 +1328,7 @@ def _new_obligation_callback_response(user, telegram_user_id, data, chat_id, mes
     return _t(lang, 'unsupported_action'), _main_menu_markup(current=None, lang=lang)
 
 
-def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, today, lang=None):
+def _pending_obligation_creation_text(user, telegram_user_id, chat_id, incoming_message_id, text, today, lang=None):
     lang = lang or _language_for_user(user)
     context = PENDING_OBLIGATION_CREATIONS.get(telegram_user_id)
     if not context:
@@ -1343,7 +1352,14 @@ def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, tod
             return _panel_result(panel_chat_id, panel_message_id, _t(lang, 'title_error'), _new_obligation_cancel_markup(lang))
         context['title'] = title
         context['step'] = 'amount'
-        return _panel_result(panel_chat_id, panel_message_id, _t(lang, 'send_initial_amount'), _new_obligation_cancel_markup(lang))
+        return _panel_result_with_delete(
+            panel_chat_id,
+            panel_message_id,
+            _new_obligation_amount_text(context, lang),
+            _new_obligation_cancel_markup(lang),
+            chat_id,
+            incoming_message_id,
+        )
 
     if step == 'amount':
         amount_units, error = _parse_amount_units(text, lang)
@@ -1351,7 +1367,14 @@ def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, tod
             return _panel_result(panel_chat_id, panel_message_id, error, _new_obligation_cancel_markup(lang))
         context['amount_units'] = amount_units
         context['step'] = 'opened_on_choice'
-        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_date_text(lang), _new_obligation_date_markup(lang))
+        return _panel_result_with_delete(
+            panel_chat_id,
+            panel_message_id,
+            _new_obligation_date_text(context, lang),
+            _new_obligation_date_markup(lang),
+            chat_id,
+            incoming_message_id,
+        )
 
     if step == 'opened_on':
         opened_on, error = _parse_user_date(text)
@@ -1359,10 +1382,17 @@ def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, tod
             return _panel_result(panel_chat_id, panel_message_id, _t(lang, 'opened_date_error', date=_format_date(today)), _new_obligation_cancel_markup(lang))
         context['opened_on'] = opened_on
         context['step'] = 'schedule'
-        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_schedule_text(context, lang), _new_obligation_schedule_markup(lang))
+        return _panel_result_with_delete(
+            panel_chat_id,
+            panel_message_id,
+            _new_obligation_schedule_text(context, lang),
+            _new_obligation_schedule_markup(lang),
+            chat_id,
+            incoming_message_id,
+        )
 
     if step == 'opened_on_choice':
-        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_date_text(lang), _new_obligation_date_markup(lang))
+        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_date_text(context, lang), _new_obligation_date_markup(lang))
 
     if step == 'schedule':
         return _panel_result(panel_chat_id, panel_message_id, _new_obligation_schedule_text(context, lang), _new_obligation_schedule_markup(lang))
@@ -1373,7 +1403,14 @@ def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, tod
             return _panel_result(panel_chat_id, panel_message_id, error, _new_obligation_month_day_markup(context, lang))
         context['recurring_day_of_month'] = day_of_month
         context['step'] = 'interest'
-        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_interest_text(context, lang), _new_obligation_interest_markup(lang))
+        return _panel_result_with_delete(
+            panel_chat_id,
+            panel_message_id,
+            _new_obligation_interest_text(context, lang),
+            _new_obligation_interest_markup(lang),
+            chat_id,
+            incoming_message_id,
+        )
 
     if step == 'interest_rate':
         try:
@@ -1384,7 +1421,14 @@ def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, tod
             return _panel_result(panel_chat_id, panel_message_id, _t(lang, 'interest_positive_error'), _new_obligation_cancel_markup(lang))
         context['annual_rate_percent'] = annual_rate_percent
         context['step'] = 'confirm'
-        return _panel_result(panel_chat_id, panel_message_id, _new_obligation_confirm_text(user, context, lang), _new_obligation_confirm_markup(lang))
+        return _panel_result_with_delete(
+            panel_chat_id,
+            panel_message_id,
+            _new_obligation_confirm_text(user, context, lang),
+            _new_obligation_confirm_markup(lang),
+            chat_id,
+            incoming_message_id,
+        )
 
     if step == 'interest':
         return _panel_result(panel_chat_id, panel_message_id, _new_obligation_interest_text(context, lang), _new_obligation_interest_markup(lang))
@@ -1395,7 +1439,7 @@ def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, tod
 def _new_obligation_schedule_callback(context, schedule, lang=LANG_EN):
     opened_on = context.get('opened_on')
     if not opened_on:
-        return _new_obligation_date_text(lang), _new_obligation_date_markup(lang)
+        return _new_obligation_date_text(context, lang), _new_obligation_date_markup(lang)
 
     if schedule == PAYMENT_MODE_ONE_TIME:
         context['payment_mode'] = PAYMENT_MODE_ONE_TIME
@@ -1407,7 +1451,7 @@ def _new_obligation_schedule_callback(context, schedule, lang=LANG_EN):
         context['recurring_frequency'] = EventSeries.Frequency.MONTHLY
         context['recurring_starts_on'] = opened_on
         context['step'] = 'day_of_month'
-        return _new_obligation_month_day_text(opened_on, lang), _new_obligation_month_day_markup(context, lang)
+        return _new_obligation_month_day_text(context, lang), _new_obligation_month_day_markup(context, lang)
 
     if schedule in (EventSeries.Frequency.WEEKLY, EventSeries.Frequency.BIWEEKLY):
         context['payment_mode'] = PAYMENT_MODE_RECURRING
@@ -1417,7 +1461,7 @@ def _new_obligation_schedule_callback(context, schedule, lang=LANG_EN):
         context['step'] = 'interest'
         return _new_obligation_interest_text(context, lang), _new_obligation_interest_markup(lang)
 
-    return _t(lang, 'choose_schedule_option'), _new_obligation_schedule_markup(lang)
+    return _new_obligation_step_text(context, _t(lang, 'choose_schedule_option'), lang), _new_obligation_schedule_markup(lang)
 
 
 def _create_obligation_from_context(user, context, lang=LANG_EN):
@@ -1910,13 +1954,44 @@ def _new_obligation_role_markup(lang=LANG_EN):
     }
 
 
-def _new_obligation_counterparty_text(role, lang=LANG_EN):
+def _new_obligation_counterparty_text(context_or_role, lang=LANG_EN):
+    context = context_or_role if isinstance(context_or_role, dict) else {'role': context_or_role}
+    role = context.get('role')
     direction = _t(lang, 'who_borrowed_from_you') if role == ROLE_LENT else _t(lang, 'who_lent_to_you')
-    return '\n'.join([
-        _t(lang, 'new_obligation'),
-        '',
-        direction,
-    ])
+    return _new_obligation_step_text(context, direction, lang)
+
+
+def _new_obligation_step_text(context, prompt, lang=LANG_EN):
+    lines = [_t(lang, 'new_obligation')]
+
+    role = context.get('role')
+    if role:
+        lines.append(f'{_t(lang, "role")}: {_role_label(role, lang)}')
+
+    counterparty_id = context.get('counterparty_id')
+    if counterparty_id:
+        counterparty = get_user_model().objects.filter(pk=counterparty_id).first()
+        if counterparty:
+            lines.append(f'{_t(lang, "counterparty")}: {_user_label(counterparty)}')
+
+    if context.get('title'):
+        lines.append(f'{_t(lang, "title")}: {context["title"]}')
+    if context.get('amount_units') is not None:
+        lines.append(f'{_t(lang, "amount")}: {_format_money(context["amount_units"])}')
+    if context.get('opened_on'):
+        lines.append(f'{_t(lang, "opened")}: {_format_date(context["opened_on"])}')
+    if context.get('payment_mode'):
+        lines.append(f'{_t(lang, "schedule")}: {_new_obligation_schedule_label(context, lang)}')
+    if context.get('has_interest') is not None:
+        interest_label = (
+            f'{context["annual_rate_percent"]}% APY'
+            if context.get('has_interest') and context.get('annual_rate_percent') is not None
+            else _t(lang, 'yes_no_no')
+        )
+        lines.append(f'{_t(lang, "interest")}: {interest_label}')
+
+    lines.extend(['', prompt])
+    return '\n'.join(lines)
 
 
 def _new_obligation_counterparty_markup(user, lang=LANG_EN):
@@ -1927,14 +2002,12 @@ def _new_obligation_counterparty_markup(user, lang=LANG_EN):
     return {'inline_keyboard': rows}
 
 
-def _new_obligation_title_text(context, counterparty, lang=LANG_EN):
-    return '\n'.join([
-        _t(lang, 'new_obligation'),
-        f'{_t(lang, "role")}: {_role_label(context["role"], lang)}',
-        f'{_t(lang, "counterparty")}: {_user_label(counterparty)}',
-        '',
-        _t(lang, 'send_title'),
-    ])
+def _new_obligation_title_text(context, lang=LANG_EN):
+    return _new_obligation_step_text(context, _t(lang, 'send_title'), lang)
+
+
+def _new_obligation_amount_text(context, lang=LANG_EN):
+    return _new_obligation_step_text(context, _t(lang, 'send_initial_amount'), lang)
 
 
 def _new_obligation_cancel_markup(lang=LANG_EN):
@@ -1946,12 +2019,12 @@ def _new_obligation_cancel_markup(lang=LANG_EN):
     }
 
 
-def _new_obligation_date_text(lang=LANG_EN):
-    return '\n'.join([
-        _t(lang, 'new_obligation'),
-        '',
-        _t(lang, 'choose_opened_date'),
-    ])
+def _new_obligation_date_text(context=None, lang=LANG_EN):
+    return _new_obligation_step_text(context or {}, _t(lang, 'choose_opened_date'), lang)
+
+
+def _new_obligation_opened_date_text(context, lang=LANG_EN):
+    return _new_obligation_step_text(context, _t(lang, 'send_opened_date'), lang)
 
 
 def _new_obligation_date_markup(lang=LANG_EN):
@@ -1965,14 +2038,7 @@ def _new_obligation_date_markup(lang=LANG_EN):
 
 
 def _new_obligation_schedule_text(context, lang=LANG_EN):
-    return '\n'.join([
-        _t(lang, 'new_obligation'),
-        f'{_t(lang, "title")}: {context.get("title", "")}',
-        f'{_t(lang, "amount")}: {_format_money(context.get("amount_units", 0))}',
-        f'{_t(lang, "opened")}: {_format_date(context["opened_on"])}',
-        '',
-        _t(lang, 'choose_payment_schedule'),
-    ])
+    return _new_obligation_step_text(context, _t(lang, 'choose_payment_schedule'), lang)
 
 
 def _new_obligation_schedule_markup(lang=LANG_EN):
@@ -1987,12 +2053,8 @@ def _new_obligation_schedule_markup(lang=LANG_EN):
     }
 
 
-def _new_obligation_month_day_text(opened_on, lang=LANG_EN):
-    return '\n'.join([
-        _t(lang, 'monthly_recurring'),
-        '',
-        _t(lang, 'monthly_day_prompt'),
-    ])
+def _new_obligation_month_day_text(context, lang=LANG_EN):
+    return _new_obligation_step_text(context, _t(lang, 'monthly_day_prompt'), lang)
 
 
 def _new_obligation_month_day_markup(context, lang=LANG_EN):
@@ -2006,13 +2068,11 @@ def _new_obligation_month_day_markup(context, lang=LANG_EN):
 
 
 def _new_obligation_interest_text(context, lang=LANG_EN):
-    return '\n'.join([
-        _t(lang, 'new_obligation'),
-        f'{_t(lang, "title")}: {context.get("title", "")}',
-        f'{_t(lang, "schedule")}: {_new_obligation_schedule_label(context, lang)}',
-        '',
-        _t(lang, 'add_interest'),
-    ])
+    return _new_obligation_step_text(context, _t(lang, 'add_interest'), lang)
+
+
+def _new_obligation_interest_rate_text(context, lang=LANG_EN):
+    return _new_obligation_step_text(context, _t(lang, 'send_interest_rate'), lang)
 
 
 def _new_obligation_interest_markup(lang=LANG_EN):
@@ -2123,7 +2183,10 @@ def _new_obligation_schedule_label(context, lang=LANG_EN):
 
     frequency = context.get('recurring_frequency')
     if frequency == EventSeries.Frequency.MONTHLY:
-        return _t(lang, 'schedule_monthly', day=context.get('recurring_day_of_month'))
+        day = context.get('recurring_day_of_month')
+        if day:
+            return _t(lang, 'schedule_monthly', day=day)
+        return _t(lang, 'monthly_recurring')
     if frequency == EventSeries.Frequency.WEEKLY:
         day_name = DAY_NAME_TEXT.get(lang, DAY_NAMES)[context.get('recurring_day_of_week') or 0]
         return _t(lang, 'schedule_weekly', day=day_name)
@@ -2160,6 +2223,16 @@ def _single_message(chat_id, text, reply_markup=None):
 
 def _panel_result(chat_id, message_id, text, reply_markup=None):
     return TelegramBotResult(messages=[_panel_message(chat_id, message_id, text, reply_markup)])
+
+
+def _panel_result_with_delete(chat_id, message_id, text, reply_markup, delete_chat_id, delete_message_id):
+    delete_messages = []
+    if delete_message_id is not None:
+        delete_messages.append(TelegramMessageDelete(delete_chat_id, delete_message_id))
+    return TelegramBotResult(
+        messages=[_panel_message(chat_id, message_id, text, reply_markup)],
+        delete_messages=delete_messages,
+    )
 
 
 def _panel_message(chat_id, message_id, text, reply_markup=None):

@@ -69,6 +69,14 @@ def edit_telegram_message(chat_id, message_id, text, reply_markup=None):
     return telegram_api_request('editMessageText', params).get('result')
 
 
+def delete_telegram_message(chat_id, message_id):
+    params = {
+        'chat_id': chat_id,
+        'message_id': message_id,
+    }
+    return telegram_api_request('deleteMessage', params).get('result')
+
+
 def answer_telegram_callback_query(callback_query_id, text=''):
     params = {'callback_query_id': callback_query_id}
     if text:

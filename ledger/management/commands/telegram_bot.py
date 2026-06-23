@@ -3,6 +3,7 @@ from django.core.management.base import BaseCommand
 from ledger.services.telegram import (
     TelegramLookupError,
     answer_telegram_callback_query,
+    delete_telegram_message,
     edit_telegram_message,
     get_telegram_updates,
     send_telegram_message,
@@ -58,6 +59,11 @@ class Command(BaseCommand):
                                 message.text,
                                 reply_markup=message.reply_markup,
                             )
+                    for delete_request in result.delete_messages:
+                        try:
+                            delete_telegram_message(delete_request.chat_id, delete_request.message_id)
+                        except TelegramLookupError:
+                            pass
                 except TelegramLookupError as error:
                     if 'message is not modified' not in str(error).lower():
                         self.stderr.write(str(error))
