@@ -1630,7 +1630,9 @@ class ViewTests(LedgerTestCase):
         self.assertContains(response, 'Open Telegram')
         self.assertContains(response, '@TrustTrack_bot')
         self.assertContains(response, 'data:image/svg+xml')
-        self.assertContains(response, f'/login {challenge.code[:4]}-{challenge.code[4:]}')
+        self.assertContains(response, 'telegram-command-copy')
+        self.assertContains(response, f'data-copy-command="/login {challenge.code[:4]}-{challenge.code[4:]}"')
+        self.assertNotContains(response, 'id_telegram_command')
         self.assertContains(response, reverse('telegram_login_status'))
 
     def test_telegram_login_status_authenticates_confirmed_session_challenge(self):

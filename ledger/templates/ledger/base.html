@@ -464,12 +464,33 @@
             justify-content: center;
         }
         .telegram-login-qr img {
-            width: min(260px, 100%);
+            width: min(340px, 100%);
             height: auto;
             border: 1px solid var(--line);
             border-radius: 8px;
             background: white;
             padding: 10px;
+        }
+        .telegram-login-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .telegram-command-copy {
+            max-width: 220px;
+            justify-content: flex-start;
+            overflow: hidden;
+        }
+        .telegram-command-copy.is-copied {
+            background: #eef5f2;
+        }
+        .telegram-command-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+            font-size: 0.94rem;
         }
         label {
             display: block;
@@ -634,6 +655,8 @@
             .filter-field-search,
             .filter-actions { width: 100%; }
             .filter-actions .button { flex: 1; }
+            .telegram-login-actions > .button { flex: 1 1 auto; }
+            .telegram-command-copy { max-width: 100%; }
             th, td { white-space: normal; }
         }
         @media (min-width: 761px) and (max-width: 1020px) {

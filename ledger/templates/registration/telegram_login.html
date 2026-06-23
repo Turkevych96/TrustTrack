@@ -16,21 +16,28 @@
         <div class="telegram-login-qr">
             <img src="{{ telegram_qr_svg_data_uri }}" alt="Telegram login QR code">
         </div>
-        <div class="actions">
-            <a class="button" href="{{ telegram_deep_link }}">Open Telegram</a>
-        </div>
     {% else %}
         <div class="setting-note">
             Telegram bot username is not configured, so QR login is unavailable.
         </div>
     {% endif %}
 
-    <div>
-        <label for="id_telegram_command">One-time Telegram command</label>
-        <input id="id_telegram_command" type="text" value="{{ telegram_login_command }}" readonly>
-        <div class="muted">
-            Send this command to {% if telegram_bot_username %}@{{ telegram_bot_username }}{% else %}the TrustTrack bot{% endif %}.
-        </div>
+    <div class="telegram-login-actions">
+        {% if telegram_deep_link %}
+            <a class="button" href="{{ telegram_deep_link }}">Open Telegram</a>
+        {% endif %}
+        <button
+            class="button secondary telegram-command-copy"
+            type="button"
+            data-copy-command="{{ telegram_login_command }}"
+            aria-describedby="telegram-command-status"
+            title="Copy one-time Telegram command"
+        >
+            <span class="telegram-command-label">{{ telegram_login_command }}</span>
+        </button>
+    </div>
+    <div id="telegram-command-status" class="muted" aria-live="polite">
+        Send this command to {% if telegram_bot_username %}@{{ telegram_bot_username }}{% else %}the TrustTrack bot{% endif %}.
     </div>
 
     <div id="telegram-login-status" class="message" data-status-url="{{ status_url }}" data-restart-url="{{ restart_url }}">
@@ -50,6 +57,9 @@
         const statusNode = document.getElementById('telegram-login-status');
         if (!statusNode) return;
 
+        const copyButton = document.querySelector('[data-copy-command]');
+        const commandStatus = document.getElementById('telegram-command-status');
+        const originalCommandStatus = commandStatus ? commandStatus.textContent.trim() : '';
         const statusUrl = statusNode.dataset.statusUrl;
         const restartUrl = statusNode.dataset.restartUrl;
         const messages = {
@@ -80,6 +90,45 @@
                 }
             }
         };
+
+        const copyText = async (text) => {
+            if (navigator.clipboard && window.isSecureContext) {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                } catch (error) {
+                    // Fall back to a hidden textarea when direct clipboard access is denied.
+                }
+            }
+
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.setAttribute('readonly', '');
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                return document.execCommand('copy');
+            } catch (error) {
+                return false;
+            } finally {
+                document.body.removeChild(textArea);
+            }
+        };
+
+        if (copyButton && commandStatus) {
+            copyButton.addEventListener('click', async () => {
+                const copied = await copyText(copyButton.dataset.copyCommand);
+                commandStatus.textContent = copied ? 'Code copied.' : 'Could not copy the code.';
+                copyButton.classList.toggle('is-copied', copied);
+                window.setTimeout(() => {
+                    copyButton.classList.remove('is-copied');
+                    commandStatus.textContent = originalCommandStatus;
+                }, 2500);
+            });
+        }
 
         const timer = window.setInterval(checkStatus, 2500);
         checkStatus();
