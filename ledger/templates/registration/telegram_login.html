@@ -14,7 +14,13 @@
 <section class="panel form-grid">
     {% if telegram_deep_link %}
         <div class="telegram-login-qr">
-            <img src="{{ telegram_qr_svg_data_uri }}" alt="Telegram login QR code">
+            <img
+                class="telegram-login-qr-image"
+                src="{{ telegram_qr_svg_data_uri }}"
+                alt="Telegram login QR code"
+                width="300"
+                height="300"
+            >
         </div>
     {% else %}
         <div class="setting-note">
@@ -24,7 +30,7 @@
 
     <div class="telegram-login-actions">
         {% if telegram_deep_link %}
-            <a class="button" href="{{ telegram_deep_link }}">Open Telegram</a>
+            <a class="button" href="{{ telegram_deep_link }}" target="_blank" rel="noopener noreferrer">Open Telegram</a>
         {% endif %}
         <button
             class="button secondary telegram-command-copy"
