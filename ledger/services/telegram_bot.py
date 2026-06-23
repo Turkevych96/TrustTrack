@@ -42,6 +42,9 @@ PAYMENT_MODE_RECURRING = 'recurring'
 LANG_EN = UserProfile.TelegramLanguage.ENGLISH
 LANG_RU = UserProfile.TelegramLanguage.RUSSIAN
 SUPPORTED_TELEGRAM_LANGUAGES = {LANG_EN, LANG_RU}
+BUTTON_STYLE_PRIMARY = 'primary'
+BUTTON_STYLE_SUCCESS = 'success'
+BUTTON_STYLE_DANGER = 'danger'
 
 
 TELEGRAM_TEXT = {
@@ -512,7 +515,7 @@ def _process_message(message, today, nonce_factory):
         _clear_pending_context(telegram_user_id)
         return _single_message(chat_id, _start_text(profile.user, today, lang), reply_markup=_main_menu_markup(lang=lang))
     if command == '/balance':
-        return _single_message(chat_id, _balance_text(profile.user, lang), reply_markup=_main_menu_markup(lang=lang))
+        return _single_message(chat_id, _balance_text(profile.user, lang), reply_markup=_main_menu_markup(current='balance', lang=lang))
     if command in ('/settings', '/setting'):
         _clear_pending_context(telegram_user_id)
         return _single_message(
@@ -575,7 +578,7 @@ def _process_callback_query(callback_query, today, nonce_factory):
     if data == 'noop:cancel':
         _clear_pending_context(telegram_user_id)
         return TelegramBotResult(
-            messages=[_panel_message(chat_id, message_id, _t(lang, 'cancelled'), _main_menu_markup(include_home=True, lang=lang))],
+            messages=[_panel_message(chat_id, message_id, _t(lang, 'cancelled'), _main_menu_markup(current=None, lang=lang))],
             callback_query_id=callback_query_id,
             callback_text=_t(lang, 'cancelled'),
         )
@@ -588,7 +591,7 @@ def _process_callback_query(callback_query, today, nonce_factory):
         )
     if data == 'menu:balance':
         return TelegramBotResult(
-            messages=[_panel_message(chat_id, message_id, _balance_text(profile.user, lang), _main_menu_markup(include_home=True, lang=lang))],
+            messages=[_panel_message(chat_id, message_id, _balance_text(profile.user, lang), _main_menu_markup(current='balance', lang=lang))],
             callback_query_id=callback_query_id,
             callback_text=_t(lang, 'balance'),
         )
@@ -612,7 +615,7 @@ def _process_callback_query(callback_query, today, nonce_factory):
                     chat_id,
                     message_id,
                     _recent_transactions_text(profile.user, lang),
-                    _main_menu_markup(include_home=True, lang=lang),
+                    _main_menu_markup(current='recent', lang=lang),
                 )
             ],
             callback_query_id=callback_query_id,
@@ -751,20 +754,20 @@ def _process_callback_query(callback_query, today, nonce_factory):
     if data.startswith('repay:'):
         text = _confirm_repayment(profile.user, data, today, lang)
         return TelegramBotResult(
-            messages=[_panel_message(chat_id, message_id, text, _main_menu_markup(include_home=True, lang=lang))],
+            messages=[_panel_message(chat_id, message_id, text, _main_menu_markup(current=None, lang=lang))],
             callback_query_id=callback_query_id,
             callback_text=_t(lang, 'processed'),
         )
     if data.startswith('advance:'):
         text = _confirm_debt_increase(profile.user, data, today, lang)
         return TelegramBotResult(
-            messages=[_panel_message(chat_id, message_id, text, _main_menu_markup(include_home=True, lang=lang))],
+            messages=[_panel_message(chat_id, message_id, text, _main_menu_markup(current=None, lang=lang))],
             callback_query_id=callback_query_id,
             callback_text=_t(lang, 'processed'),
         )
 
     return TelegramBotResult(
-        messages=[_panel_message(chat_id, message_id, _t(lang, 'unsupported_button'), _main_menu_markup(include_home=True, lang=lang))],
+        messages=[_panel_message(chat_id, message_id, _t(lang, 'unsupported_button'), _main_menu_markup(current=None, lang=lang))],
         callback_query_id=callback_query_id,
         callback_text=_t(lang, 'unsupported_action'),
     )
@@ -873,16 +876,17 @@ def _settings_markup(profile, lang):
     return {
         'inline_keyboard': [
             [
-                {'text': _t(lang, 'language_english'), 'callback_data': f'settings:lang:{LANG_EN}'},
-                {'text': _t(lang, 'language_russian'), 'callback_data': f'settings:lang:{LANG_RU}'},
+                _telegram_button(_t(lang, 'language_english'), f'settings:lang:{LANG_EN}'),
+                _telegram_button(_t(lang, 'language_russian'), f'settings:lang:{LANG_RU}'),
             ],
             [
-                {
-                    'text': _t(lang, notification_button),
-                    'callback_data': f'settings:due:{next_notification_state}',
-                }
+                _telegram_button(
+                    _t(lang, notification_button),
+                    f'settings:due:{next_notification_state}',
+                    BUTTON_STYLE_DANGER if notifications_enabled else BUTTON_STYLE_SUCCESS,
+                )
             ],
-            [{'text': _t(lang, 'home'), 'callback_data': 'menu:home'}],
+            _navigation_row(lang, current='settings'),
         ],
     }
 
@@ -1092,8 +1096,12 @@ def _manual_transfer_preview_for_obligation(
         text,
         reply_markup={
             'inline_keyboard': [
-                [{'text': _t(lang, confirm_key), 'callback_data': callback_data}],
-                [{'text': _t(lang, 'cancel'), 'callback_data': 'noop:cancel'}],
+                [_telegram_button(
+                    _t(lang, confirm_key),
+                    callback_data,
+                    BUTTON_STYLE_SUCCESS if is_repayment else BUTTON_STYLE_DANGER,
+                )],
+                [_telegram_button(_t(lang, 'cancel'), 'noop:cancel', BUTTON_STYLE_DANGER)],
             ],
         },
     )
@@ -1234,7 +1242,7 @@ def _new_obligation_callback_response(user, telegram_user_id, data, chat_id, mes
     lang = lang or _language_for_user(user)
     parts = data.split(':')
     if len(parts) < 2:
-        return _t(lang, 'unsupported_action'), _main_menu_markup(include_home=True, lang=lang)
+        return _t(lang, 'unsupported_action'), _main_menu_markup(current=None, lang=lang)
 
     action = parts[1]
     if action == 'role' and len(parts) == 3:
@@ -1257,7 +1265,7 @@ def _new_obligation_callback_response(user, telegram_user_id, data, chat_id, mes
 
     if action == 'cancel':
         PENDING_OBLIGATION_CREATIONS.pop(telegram_user_id, None)
-        return _t(lang, 'new_obligation_cancelled'), _main_menu_markup(include_home=True, lang=lang)
+        return _t(lang, 'new_obligation_cancelled'), _main_menu_markup(current=None, lang=lang)
 
     if action == 'cp' and len(parts) == 3:
         counterparty = _get_counterparty(user, parts[2])
@@ -1306,9 +1314,9 @@ def _new_obligation_callback_response(user, telegram_user_id, data, chat_id, mes
         except (ValidationError, ValueError) as error:
             return _validation_error_text(error, lang), _new_obligation_confirm_markup(lang)
         PENDING_OBLIGATION_CREATIONS.pop(telegram_user_id, None)
-        return _new_obligation_created_text(obligation, lang), _main_menu_markup(include_home=True, lang=lang)
+        return _new_obligation_created_text(obligation, lang), _main_menu_markup(current=None, lang=lang)
 
-    return _t(lang, 'unsupported_action'), _main_menu_markup(include_home=True, lang=lang)
+    return _t(lang, 'unsupported_action'), _main_menu_markup(current=None, lang=lang)
 
 
 def _pending_obligation_creation_text(user, telegram_user_id, chat_id, text, today, lang=None):
@@ -1815,15 +1823,39 @@ def _obligation_detail_text(user, obligation, lang=None):
     ])
 
 
-def _main_menu_markup(include_home=False, lang=LANG_EN):
+def _telegram_button(text, callback_data, style=None):
+    button = {'text': text, 'callback_data': callback_data}
+    if style:
+        button['style'] = style
+    return button
+
+
+def _home_button(lang):
+    return _telegram_button(_t(lang, 'home'), 'menu:home', BUTTON_STYLE_PRIMARY)
+
+
+def _balance_button(lang):
+    return _telegram_button(_t(lang, 'balance'), 'menu:balance', BUTTON_STYLE_PRIMARY)
+
+
+def _navigation_row(lang, current=None):
+    row = []
+    if current != 'home':
+        row.append(_home_button(lang))
+    if current != 'balance':
+        row.append(_balance_button(lang))
+    return row
+
+
+def _main_menu_markup(current='home', lang=LANG_EN):
     rows = []
-    if include_home:
-        rows.append([{'text': _t(lang, 'home'), 'callback_data': 'menu:home'}])
-    rows.extend([
-        [{'text': _t(lang, 'balance'), 'callback_data': 'menu:balance'}],
-        [{'text': _t(lang, 'open_obligations'), 'callback_data': 'menu:obligations'}],
-        [{'text': _t(lang, 'recent_transactions'), 'callback_data': 'menu:recent'}],
-    ])
+    if current != 'obligations':
+        rows.append([_telegram_button(_t(lang, 'open_obligations'), 'menu:obligations')])
+    if current != 'recent':
+        rows.append([_telegram_button(_t(lang, 'recent_transactions'), 'menu:recent')])
+    nav_row = _navigation_row(lang, current=current)
+    if nav_row:
+        rows.append(nav_row)
     return {'inline_keyboard': rows}
 
 
@@ -1833,28 +1865,19 @@ def _obligations_menu_markup(user, lang=None):
     for obligation in _open_obligations_for_user(user):
         balance_units = get_obligation_balance(obligation)
         rows.append([
-            {
-                'text': f'{obligation.title} - {_format_money(balance_units)}',
-                'callback_data': f'ob:{obligation.pk}',
-            }
+            _telegram_button(f'{obligation.title} - {_format_money(balance_units)}', f'ob:{obligation.pk}')
         ])
-    rows.append([{'text': _t(lang, 'new_obligation'), 'callback_data': 'menu:new_obligation'}])
-    rows.append([
-        {'text': _t(lang, 'home'), 'callback_data': 'menu:home'},
-        {'text': _t(lang, 'balance'), 'callback_data': 'menu:balance'},
-    ])
+    rows.append([_telegram_button(_t(lang, 'new_obligation'), 'menu:new_obligation', BUTTON_STYLE_SUCCESS)])
+    rows.append(_navigation_row(lang, current='obligations'))
     return {'inline_keyboard': rows}
 
 
 def _obligation_detail_markup(obligation, lang=LANG_EN):
     return {
         'inline_keyboard': [
-            [{'text': _t(lang, 'add_manual_transfer'), 'callback_data': f'transfermenu:{obligation.pk}'}],
-            [{'text': _t(lang, 'back_to_obligations'), 'callback_data': 'menu:obligations'}],
-            [
-                {'text': _t(lang, 'home'), 'callback_data': 'menu:home'},
-                {'text': _t(lang, 'balance'), 'callback_data': 'menu:balance'},
-            ],
+            [_telegram_button(_t(lang, 'add_manual_transfer'), f'transfermenu:{obligation.pk}', BUTTON_STYLE_SUCCESS)],
+            [_telegram_button(_t(lang, 'back_to_obligations'), 'menu:obligations')],
+            _navigation_row(lang, current='obligation'),
         ],
     }
 
@@ -1862,9 +1885,9 @@ def _obligation_detail_markup(obligation, lang=LANG_EN):
 def _manual_transfer_type_markup(obligation, lang=LANG_EN):
     return {
         'inline_keyboard': [
-            [{'text': _t(lang, 'transfer_repayment'), 'callback_data': f'transfer:repayment:{obligation.pk}'}],
-            [{'text': _t(lang, 'transfer_debt_increase'), 'callback_data': f'transfer:advance:{obligation.pk}'}],
-            [{'text': _t(lang, 'back'), 'callback_data': f'ob:{obligation.pk}'}],
+            [_telegram_button(_t(lang, 'transfer_repayment'), f'transfer:repayment:{obligation.pk}', BUTTON_STYLE_SUCCESS)],
+            [_telegram_button(_t(lang, 'transfer_debt_increase'), f'transfer:advance:{obligation.pk}', BUTTON_STYLE_DANGER)],
+            [_telegram_button(_t(lang, 'back'), f'ob:{obligation.pk}', BUTTON_STYLE_PRIMARY)],
         ],
     }
 
@@ -1880,9 +1903,9 @@ def _new_obligation_role_text(lang=LANG_EN):
 def _new_obligation_role_markup(lang=LANG_EN):
     return {
         'inline_keyboard': [
-            [{'text': _t(lang, 'i_lent_money'), 'callback_data': f'newob:role:{ROLE_LENT}'}],
-            [{'text': _t(lang, 'i_borrowed_money'), 'callback_data': f'newob:role:{ROLE_BORROWED}'}],
-            [{'text': _t(lang, 'home'), 'callback_data': 'menu:home'}],
+            [_telegram_button(_t(lang, 'i_lent_money'), f'newob:role:{ROLE_LENT}')],
+            [_telegram_button(_t(lang, 'i_borrowed_money'), f'newob:role:{ROLE_BORROWED}')],
+            [_home_button(lang)],
         ],
     }
 
@@ -1899,8 +1922,8 @@ def _new_obligation_counterparty_text(role, lang=LANG_EN):
 def _new_obligation_counterparty_markup(user, lang=LANG_EN):
     rows = []
     for counterparty in _available_counterparties(user):
-        rows.append([{'text': _user_label(counterparty), 'callback_data': f'newob:cp:{counterparty.pk}'}])
-    rows.append([{'text': _t(lang, 'cancel'), 'callback_data': 'newob:cancel'}])
+        rows.append([_telegram_button(_user_label(counterparty), f'newob:cp:{counterparty.pk}')])
+    rows.append([_telegram_button(_t(lang, 'cancel'), 'newob:cancel', BUTTON_STYLE_DANGER)])
     return {'inline_keyboard': rows}
 
 
@@ -1917,8 +1940,8 @@ def _new_obligation_title_text(context, counterparty, lang=LANG_EN):
 def _new_obligation_cancel_markup(lang=LANG_EN):
     return {
         'inline_keyboard': [
-            [{'text': _t(lang, 'cancel'), 'callback_data': 'newob:cancel'}],
-            [{'text': _t(lang, 'home'), 'callback_data': 'menu:home'}],
+            [_telegram_button(_t(lang, 'cancel'), 'newob:cancel', BUTTON_STYLE_DANGER)],
+            [_home_button(lang)],
         ],
     }
 
@@ -1934,9 +1957,9 @@ def _new_obligation_date_text(lang=LANG_EN):
 def _new_obligation_date_markup(lang=LANG_EN):
     return {
         'inline_keyboard': [
-            [{'text': _t(lang, 'today'), 'callback_data': 'newob:date:today'}],
-            [{'text': _t(lang, 'custom_date'), 'callback_data': 'newob:date:custom'}],
-            [{'text': _t(lang, 'cancel'), 'callback_data': 'newob:cancel'}],
+            [_telegram_button(_t(lang, 'today'), 'newob:date:today')],
+            [_telegram_button(_t(lang, 'custom_date'), 'newob:date:custom')],
+            [_telegram_button(_t(lang, 'cancel'), 'newob:cancel', BUTTON_STYLE_DANGER)],
         ],
     }
 
@@ -1955,11 +1978,11 @@ def _new_obligation_schedule_text(context, lang=LANG_EN):
 def _new_obligation_schedule_markup(lang=LANG_EN):
     return {
         'inline_keyboard': [
-            [{'text': _t(lang, 'one_time_payment'), 'callback_data': f'newob:schedule:{PAYMENT_MODE_ONE_TIME}'}],
-            [{'text': _t(lang, 'monthly_recurring'), 'callback_data': f'newob:schedule:{EventSeries.Frequency.MONTHLY}'}],
-            [{'text': _t(lang, 'weekly_recurring'), 'callback_data': f'newob:schedule:{EventSeries.Frequency.WEEKLY}'}],
-            [{'text': _t(lang, 'biweekly_recurring'), 'callback_data': f'newob:schedule:{EventSeries.Frequency.BIWEEKLY}'}],
-            [{'text': _t(lang, 'cancel'), 'callback_data': 'newob:cancel'}],
+            [_telegram_button(_t(lang, 'one_time_payment'), f'newob:schedule:{PAYMENT_MODE_ONE_TIME}')],
+            [_telegram_button(_t(lang, 'monthly_recurring'), f'newob:schedule:{EventSeries.Frequency.MONTHLY}')],
+            [_telegram_button(_t(lang, 'weekly_recurring'), f'newob:schedule:{EventSeries.Frequency.WEEKLY}')],
+            [_telegram_button(_t(lang, 'biweekly_recurring'), f'newob:schedule:{EventSeries.Frequency.BIWEEKLY}')],
+            [_telegram_button(_t(lang, 'cancel'), 'newob:cancel', BUTTON_STYLE_DANGER)],
         ],
     }
 
@@ -1976,8 +1999,8 @@ def _new_obligation_month_day_markup(context, lang=LANG_EN):
     opened_on = context.get('opened_on') or timezone.localdate()
     return {
         'inline_keyboard': [
-            [{'text': _t(lang, 'use_day', day=opened_on.day), 'callback_data': f'newob:dom:{opened_on.day}'}],
-            [{'text': _t(lang, 'cancel'), 'callback_data': 'newob:cancel'}],
+            [_telegram_button(_t(lang, 'use_day', day=opened_on.day), f'newob:dom:{opened_on.day}')],
+            [_telegram_button(_t(lang, 'cancel'), 'newob:cancel', BUTTON_STYLE_DANGER)],
         ],
     }
 
@@ -1995,9 +2018,9 @@ def _new_obligation_interest_text(context, lang=LANG_EN):
 def _new_obligation_interest_markup(lang=LANG_EN):
     return {
         'inline_keyboard': [
-            [{'text': _t(lang, 'no_interest'), 'callback_data': 'newob:interest:no'}],
-            [{'text': _t(lang, 'with_interest'), 'callback_data': 'newob:interest:yes'}],
-            [{'text': _t(lang, 'cancel'), 'callback_data': 'newob:cancel'}],
+            [_telegram_button(_t(lang, 'no_interest'), 'newob:interest:no')],
+            [_telegram_button(_t(lang, 'with_interest'), 'newob:interest:yes')],
+            [_telegram_button(_t(lang, 'cancel'), 'newob:cancel', BUTTON_STYLE_DANGER)],
         ],
     }
 
@@ -2023,8 +2046,8 @@ def _new_obligation_confirm_text(user, context, lang=LANG_EN):
 def _new_obligation_confirm_markup(lang=LANG_EN):
     return {
         'inline_keyboard': [
-            [{'text': _t(lang, 'create_obligation'), 'callback_data': 'newob:create'}],
-            [{'text': _t(lang, 'cancel'), 'callback_data': 'newob:cancel'}],
+            [_telegram_button(_t(lang, 'create_obligation'), 'newob:create', BUTTON_STYLE_SUCCESS)],
+            [_telegram_button(_t(lang, 'cancel'), 'newob:cancel', BUTTON_STYLE_DANGER)],
         ],
     }
 
@@ -2045,23 +2068,25 @@ def _repayment_amount_markup(obligation, balance_units, lang=LANG_EN):
         amount_units = units_from_decimal(amount)
         if amount_units <= balance_units:
             used_amounts.add(amount_units)
-            quick_buttons.append({
-                'text': _t(lang, 'pay', amount=_format_money(amount_units)),
-                'callback_data': f'repayamt:{obligation.pk}:{amount_units}',
-            })
+            quick_buttons.append(_telegram_button(
+                _t(lang, 'pay', amount=_format_money(amount_units)),
+                f'repayamt:{obligation.pk}:{amount_units}',
+                BUTTON_STYLE_SUCCESS,
+            ))
     for index in range(0, len(quick_buttons), 2):
         rows.append(quick_buttons[index:index + 2])
 
     if balance_units not in used_amounts:
         rows.append([
-            {
-                'text': _t(lang, 'pay_full_balance', amount=_format_money(balance_units)),
-                'callback_data': f'repayamt:{obligation.pk}:{balance_units}',
-            }
+            _telegram_button(
+                _t(lang, 'pay_full_balance', amount=_format_money(balance_units)),
+                f'repayamt:{obligation.pk}:{balance_units}',
+                BUTTON_STYLE_SUCCESS,
+            )
         ])
 
-    rows.append([{'text': _t(lang, 'custom_amount'), 'callback_data': f'customrepay:{obligation.pk}'}])
-    rows.append([{'text': _t(lang, 'back'), 'callback_data': f'ob:{obligation.pk}'}])
+    rows.append([_telegram_button(_t(lang, 'custom_amount'), f'customrepay:{obligation.pk}', BUTTON_STYLE_PRIMARY)])
+    rows.append([_telegram_button(_t(lang, 'back'), f'ob:{obligation.pk}', BUTTON_STYLE_PRIMARY)])
     return {'inline_keyboard': rows}
 
 

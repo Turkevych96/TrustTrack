@@ -250,9 +250,9 @@ class TelegramBotTests(LedgerTestCase):
         self.assertEqual(
             result.messages[0].reply_markup['inline_keyboard'],
             [
-                [{'text': 'Balance', 'callback_data': 'menu:balance'}],
                 [{'text': 'Open obligations', 'callback_data': 'menu:obligations'}],
                 [{'text': 'Recent transactions', 'callback_data': 'menu:recent'}],
+                [{'text': 'Balance', 'callback_data': 'menu:balance', 'style': 'primary'}],
             ],
         )
 
@@ -286,9 +286,9 @@ class TelegramBotTests(LedgerTestCase):
         self.assertEqual(
             start.messages[0].reply_markup['inline_keyboard'],
             [
-                [{'text': 'Баланс', 'callback_data': 'menu:balance'}],
                 [{'text': 'Открытые обязательства', 'callback_data': 'menu:obligations'}],
                 [{'text': 'Последние операции', 'callback_data': 'menu:recent'}],
+                [{'text': 'Баланс', 'callback_data': 'menu:balance', 'style': 'primary'}],
             ],
         )
 
@@ -336,13 +336,13 @@ class TelegramBotTests(LedgerTestCase):
         self.assertIn('Открытые обязательства', obligations.messages[0].text)
         self.assertEqual(
             obligations.messages[0].reply_markup['inline_keyboard'][-2],
-            [{'text': 'Новое обязательство', 'callback_data': 'menu:new_obligation'}],
+            [{'text': 'Новое обязательство', 'callback_data': 'menu:new_obligation', 'style': 'success'}],
         )
         self.assertIn('Ваша роль: заёмщик', detail.messages[0].text)
         self.assertIn('Текущий баланс: $75.00', detail.messages[0].text)
         self.assertEqual(
             detail.messages[0].reply_markup['inline_keyboard'][0][0],
-            {'text': 'Ручная операция', 'callback_data': f'transfermenu:{self.obligation.pk}'},
+            {'text': 'Ручная операция', 'callback_data': f'transfermenu:{self.obligation.pk}', 'style': 'success'},
         )
         self.assertIn('Последние операции', recent.messages[0].text)
         self.assertIn('Погашение', recent.messages[0].text)
@@ -362,6 +362,21 @@ class TelegramBotTests(LedgerTestCase):
         self.assertIn('TrustTrack', result.messages[0].text)
         self.assertIn('I owe: $100.00', result.messages[0].text)
 
+    def test_balance_button_keeps_home_navigation_at_bottom(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+
+        result = process_telegram_update(
+            self._telegram_callback('menu:balance', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+
+        keyboard = result.messages[0].reply_markup['inline_keyboard']
+        self.assertTrue(result.messages[0].replace_existing)
+        self.assertIn('TrustTrack balance', result.messages[0].text)
+        self.assertEqual(keyboard[-1], [{'text': 'Home', 'callback_data': 'menu:home', 'style': 'primary'}])
+        self.assertNotIn('menu:balance', [button['callback_data'] for row in keyboard for button in row])
+
     def test_recent_transactions_button_edits_panel(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
         post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
@@ -379,6 +394,17 @@ class TelegramBotTests(LedgerTestCase):
         self.assertIn('01/10/2026', result.messages[0].text)
         self.assertIn('+$25.00', result.messages[0].text)
         self.assertIn('-$100.00', result.messages[0].text)
+        self.assertEqual(
+            result.messages[0].reply_markup['inline_keyboard'][-1],
+            [
+                {'text': 'Home', 'callback_data': 'menu:home', 'style': 'primary'},
+                {'text': 'Balance', 'callback_data': 'menu:balance', 'style': 'primary'},
+            ],
+        )
+        self.assertNotIn(
+            'menu:recent',
+            [button['callback_data'] for row in result.messages[0].reply_markup['inline_keyboard'] for button in row],
+        )
 
     def test_new_obligation_wizard_creates_one_time_obligation(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
@@ -527,13 +553,13 @@ class TelegramBotTests(LedgerTestCase):
         self.assertEqual(list_result.messages[0].message_id, 99)
         self.assertEqual(
             list_result.messages[0].reply_markup['inline_keyboard'][-2],
-            [{'text': 'New obligation', 'callback_data': 'menu:new_obligation'}],
+            [{'text': 'New obligation', 'callback_data': 'menu:new_obligation', 'style': 'success'}],
         )
         self.assertEqual(
             list_result.messages[0].reply_markup['inline_keyboard'][-1],
             [
-                {'text': 'Home', 'callback_data': 'menu:home'},
-                {'text': 'Balance', 'callback_data': 'menu:balance'},
+                {'text': 'Home', 'callback_data': 'menu:home', 'style': 'primary'},
+                {'text': 'Balance', 'callback_data': 'menu:balance', 'style': 'primary'},
             ],
         )
         self.assertIn(self.obligation.title, list_result.messages[0].text)
@@ -550,17 +576,20 @@ class TelegramBotTests(LedgerTestCase):
         self.assertEqual(
             transfer_menu_result.messages[0].reply_markup['inline_keyboard'][:2],
             [
-                [{'text': 'Repayment', 'callback_data': f'transfer:repayment:{self.obligation.pk}'}],
-                [{'text': 'Debt increase', 'callback_data': f'transfer:advance:{self.obligation.pk}'}],
+                [{'text': 'Repayment', 'callback_data': f'transfer:repayment:{self.obligation.pk}', 'style': 'success'}],
+                [{'text': 'Debt increase', 'callback_data': f'transfer:advance:{self.obligation.pk}', 'style': 'danger'}],
             ],
         )
         self.assertNotIn(f'O{self.obligation.pk}', repayment_menu_result.messages[0].text)
         repayment_buttons = repayment_menu_result.messages[0].reply_markup['inline_keyboard']
         self.assertTrue(repayment_menu_result.messages[0].replace_existing)
-        self.assertIn({'text': 'Pay $25.00', 'callback_data': f'repayamt:{self.obligation.pk}:250000'}, repayment_buttons[0])
+        self.assertIn(
+            {'text': 'Pay $25.00', 'callback_data': f'repayamt:{self.obligation.pk}:250000', 'style': 'success'},
+            repayment_buttons[0],
+        )
         self.assertEqual(
             repayment_buttons[-2][0],
-            {'text': 'Custom amount', 'callback_data': f'customrepay:{self.obligation.pk}'},
+            {'text': 'Custom amount', 'callback_data': f'customrepay:{self.obligation.pk}', 'style': 'primary'},
         )
 
     def test_repayment_amount_button_opens_confirmation(self):
