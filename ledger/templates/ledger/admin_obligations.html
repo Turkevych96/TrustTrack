@@ -104,63 +104,7 @@
                         <td>
                             <div class="actions">
                                 <a class="button secondary" href="{% url 'ledger:obligation_detail' row.obligation.pk %}">View</a>
-                                <a class="button secondary" href="{% url 'admin:ledger_obligation_change' row.obligation.pk %}">Django admin</a>
-                                {% if row.obligation.status != "open" %}
-                                    <button class="button secondary" type="button" data-dialog-open="restore-obligation-{{ row.obligation.pk }}">Restore</button>
-                                {% else %}
-                                    <button class="button secondary" type="button" disabled title="Open obligations do not need restoring.">Restore</button>
-                                {% endif %}
-                                <button class="button danger" type="button" data-dialog-open="delete-obligation-{{ row.obligation.pk }}">Delete</button>
                             </div>
-
-                            {% if row.obligation.status != "open" %}
-                                <dialog class="admin-dialog" id="restore-obligation-{{ row.obligation.pk }}">
-                                    <form class="form-grid" method="post" action="{% url 'ledger:admin_obligation_restore' row.obligation.pk %}">
-                                        {% csrf_token %}
-                                        <div class="setting-head">
-                                            <div>
-                                                <h2>Restore obligation</h2>
-                                                <div class="muted">{{ row.obligation.title }} (#{{ row.obligation.pk }})</div>
-                                            </div>
-                                            <button class="link-button" type="button" data-dialog-close="restore-obligation-{{ row.obligation.pk }}">Close</button>
-                                        </div>
-                                        <div>
-                                            <label for="id_restore_confirmation_{{ row.obligation.pk }}">Confirm restore</label>
-                                            <input id="id_restore_confirmation_{{ row.obligation.pk }}" name="restore_confirmation" type="text" autocomplete="off">
-                                            <div class="muted">Type "{{ row.restore_confirmation }}" to reopen this obligation. Recurring schedules stay as they are; review them after restoring.</div>
-                                        </div>
-                                        <div class="actions">
-                                            <button class="button" type="submit">Restore obligation</button>
-                                            <button class="button secondary" type="button" data-dialog-close="restore-obligation-{{ row.obligation.pk }}">Cancel</button>
-                                        </div>
-                                    </form>
-                                </dialog>
-                            {% endif %}
-
-                            <dialog class="admin-dialog" id="delete-obligation-{{ row.obligation.pk }}">
-                                <form class="form-grid" method="post" action="{% url 'ledger:admin_obligation_delete' row.obligation.pk %}">
-                                    {% csrf_token %}
-                                    <div class="setting-head">
-                                        <div>
-                                            <h2>Delete obligation</h2>
-                                            <div class="muted">{{ row.obligation.title }} (#{{ row.obligation.pk }})</div>
-                                        </div>
-                                        <button class="link-button" type="button" data-dialog-close="delete-obligation-{{ row.obligation.pk }}">Close</button>
-                                    </div>
-                                    <div class="setting-note">
-                                        This permanently removes the obligation and its ledger history from the database.
-                                    </div>
-                                    <div>
-                                        <label for="id_delete_confirmation_{{ row.obligation.pk }}">Confirm delete</label>
-                                        <input id="id_delete_confirmation_{{ row.obligation.pk }}" name="delete_confirmation" type="text" autocomplete="off">
-                                        <div class="muted">Type "{{ row.delete_confirmation }}" to permanently delete this obligation.</div>
-                                    </div>
-                                    <div class="actions">
-                                        <button class="button danger" type="submit">Delete obligation</button>
-                                        <button class="button secondary" type="button" data-dialog-close="delete-obligation-{{ row.obligation.pk }}">Cancel</button>
-                                    </div>
-                                </form>
-                            </dialog>
                         </td>
                     </tr>
                 {% empty %}
@@ -170,36 +114,4 @@
         </table>
     </div>
 </section>
-{% endblock %}
-
-{% block extra_scripts %}
-<script>
-    (() => {
-        document.querySelectorAll('[data-dialog-open]').forEach((button) => {
-            button.addEventListener('click', () => {
-                const dialog = document.getElementById(button.dataset.dialogOpen);
-                if (!dialog) return;
-                if (typeof dialog.showModal === 'function') {
-                    dialog.showModal();
-                } else {
-                    dialog.setAttribute('open', '');
-                }
-                const field = dialog.querySelector('input[type="text"]');
-                if (field) field.focus();
-            });
-        });
-
-        document.querySelectorAll('[data-dialog-close]').forEach((button) => {
-            button.addEventListener('click', () => {
-                const dialog = document.getElementById(button.dataset.dialogClose);
-                if (!dialog) return;
-                if (typeof dialog.close === 'function') {
-                    dialog.close();
-                } else {
-                    dialog.removeAttribute('open');
-                }
-            });
-        });
-    })();
-</script>
 {% endblock %}

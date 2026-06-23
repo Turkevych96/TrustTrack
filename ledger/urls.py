@@ -15,6 +15,7 @@ urlpatterns = [
     path('admin-panel/profiles/<int:pk>/edit/', views.admin_profile_update, name='admin_profile_update'),
     path('admin-panel/profiles/<int:pk>/check-telegram/', views.admin_profile_check_telegram, name='admin_profile_check_telegram'),
     path('admin-panel/obligations/', views.admin_obligations, name='admin_obligations'),
+    path('admin-panel/obligations/<int:pk>/close/', views.admin_obligation_close, name='admin_obligation_close'),
     path('admin-panel/obligations/<int:pk>/restore/', views.admin_obligation_restore, name='admin_obligation_restore'),
     path('admin-panel/obligations/<int:pk>/delete/', views.admin_obligation_delete, name='admin_obligation_delete'),
     path('admin-panel/categories/', views.admin_categories, name='admin_categories'),

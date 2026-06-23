@@ -11,11 +11,13 @@
             {{ obligation.borrower|user_label }} owes {{ obligation.creditor|user_label }} - {{ obligation.opened_on }}
         </div>
     </div>
-    {% if obligation.status == "open" %}
+    {% if can_manage_obligation or show_admin_obligation_actions %}
         <div class="actions">
-            <a class="button secondary" href="{% url 'ledger:manual_transfer_create' obligation.id %}">Manual transfer</a>
-            <a class="button secondary" href="{% url 'ledger:recurring_charge_create' obligation.id %}">Recurring event</a>
-            <a class="button secondary" href="{% url 'ledger:interest_rate_create' obligation.id %}">Interest rate</a>
+            {% if can_manage_obligation %}
+                <a class="button secondary" href="{% url 'ledger:manual_transfer_create' obligation.id %}">Manual transfer</a>
+                <a class="button secondary" href="{% url 'ledger:recurring_charge_create' obligation.id %}">Recurring event</a>
+                <a class="button secondary" href="{% url 'ledger:interest_rate_create' obligation.id %}">Interest rate</a>
+            {% endif %}
             <details class="action-menu">
                 <summary class="button secondary icon-button" aria-label="Obligation settings" title="Obligation settings">
                     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -25,31 +27,132 @@
                     <span class="sr-only">Obligation settings</span>
                 </summary>
                 <div class="action-menu-panel">
-                    <form class="menu-form" method="post" action="{% url 'ledger:obligation_recalculate' obligation.id %}" data-recalculate-form>
-                        {% csrf_token %}
-                        <button class="menu-item" type="submit">Recalculate balance &amp; interest</button>
-                    </form>
-                    <form class="menu-form" method="post" action="{% url 'ledger:obligation_close' obligation.id %}" data-stop-tracking-form>
-                        {% csrf_token %}
-                        <input type="hidden" name="stop_tracking_confirmation" value="">
-                        <button class="menu-item danger" type="submit">Stop tracking</button>
-                    </form>
+                    {% if can_manage_obligation %}
+                        <form class="menu-form" method="post" action="{% url 'ledger:obligation_recalculate' obligation.id %}" data-recalculate-form>
+                            {% csrf_token %}
+                            <button class="menu-item" type="submit">Recalculate balance &amp; interest</button>
+                        </form>
+                    {% endif %}
+                    {% if can_stop_tracking_obligation %}
+                        <form class="menu-form" method="post" action="{% url 'ledger:obligation_close' obligation.id %}" data-stop-tracking-form>
+                            {% csrf_token %}
+                            <input type="hidden" name="stop_tracking_confirmation" value="">
+                            <button class="menu-item danger" type="submit">Stop tracking</button>
+                        </form>
+                    {% elif admin_can_close_obligation %}
+                        <button class="menu-item danger" type="button" data-dialog-open="admin-close-obligation">Stop tracking</button>
+                    {% elif admin_can_restore_or_delete_obligation %}
+                        <button class="menu-item" type="button" data-dialog-open="admin-restore-obligation">Restore</button>
+                        <button class="menu-item danger" type="button" data-dialog-open="admin-delete-obligation">Delete</button>
+                    {% endif %}
                 </div>
             </details>
         </div>
     {% endif %}
 </div>
 
+{% if admin_preview %}
+    <section class="panel setting-note">
+        Admin preview. You are not the creditor or borrower on this obligation, so editing controls are hidden.
+    </section>
+{% endif %}
+{% if show_admin_obligation_actions %}
+    {% if admin_can_close_obligation and not can_stop_tracking_obligation %}
+        <dialog class="admin-dialog" id="admin-close-obligation">
+            <form class="form-grid" method="post" action="{% url 'ledger:admin_obligation_close' obligation.pk %}">
+                {% csrf_token %}
+                <div class="setting-head">
+                    <div>
+                        <h2>Stop tracking</h2>
+                        <div class="muted">{{ obligation.title }} (#{{ obligation.pk }})</div>
+                    </div>
+                    <button class="link-button" type="button" data-dialog-close="admin-close-obligation">Close</button>
+                </div>
+                <div class="setting-note">
+                    This closes the obligation and stops future recurring charges. Existing history stays intact.
+                </div>
+                <div>
+                    <label for="id_admin_close_confirmation">Confirm close</label>
+                    <input id="id_admin_close_confirmation" name="close_confirmation" type="text" autocomplete="off">
+                    <div class="muted">Type "{{ admin_close_confirmation }}" to close this obligation.</div>
+                </div>
+                <div class="actions">
+                    <button class="button" type="submit">Stop tracking</button>
+                    <button class="button secondary" type="button" data-dialog-close="admin-close-obligation">Cancel</button>
+                </div>
+            </form>
+        </dialog>
+    {% elif admin_can_restore_or_delete_obligation %}
+        <dialog class="admin-dialog" id="admin-restore-obligation">
+            <form class="form-grid" method="post" action="{% url 'ledger:admin_obligation_restore' obligation.pk %}">
+                {% csrf_token %}
+                <div class="setting-head">
+                    <div>
+                        <h2>Restore obligation</h2>
+                        <div class="muted">{{ obligation.title }} (#{{ obligation.pk }})</div>
+                    </div>
+                    <button class="link-button" type="button" data-dialog-close="admin-restore-obligation">Close</button>
+                </div>
+                <div>
+                    <label for="id_admin_restore_confirmation">Confirm restore</label>
+                    <input id="id_admin_restore_confirmation" name="restore_confirmation" type="text" autocomplete="off">
+                    <div class="muted">Type "{{ admin_restore_confirmation }}" to reopen this obligation. Recurring schedules stay as they are; review them after restoring.</div>
+                </div>
+                <div class="actions">
+                    <button class="button" type="submit">Restore obligation</button>
+                    <button class="button secondary" type="button" data-dialog-close="admin-restore-obligation">Cancel</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog class="admin-dialog" id="admin-delete-obligation">
+            <form class="form-grid" method="post" action="{% url 'ledger:admin_obligation_delete' obligation.pk %}">
+                {% csrf_token %}
+                <div class="setting-head">
+                    <div>
+                        <h2>Delete obligation</h2>
+                        <div class="muted">{{ obligation.title }} (#{{ obligation.pk }})</div>
+                    </div>
+                    <button class="link-button" type="button" data-dialog-close="admin-delete-obligation">Close</button>
+                </div>
+                <div class="setting-note">
+                    This permanently removes the obligation and its ledger history from the database.
+                </div>
+                <div>
+                    <label for="id_admin_delete_confirmation">Confirm delete</label>
+                    <input id="id_admin_delete_confirmation" name="delete_confirmation" type="text" autocomplete="off">
+                    <div class="muted">Type "{{ admin_delete_confirmation }}" to permanently delete this obligation.</div>
+                </div>
+                <div class="actions">
+                    <button class="button danger" type="submit">Delete obligation</button>
+                    <button class="button secondary" type="button" data-dialog-close="admin-delete-obligation">Cancel</button>
+                </div>
+            </form>
+        </dialog>
+    {% endif %}
+{% endif %}
+
 <div class="metrics-stack">
-    <section class="grid metrics" aria-label="Obligation status">
+    <section class="grid metrics{% if admin_preview %} obligation-status-metrics{% endif %}" aria-label="Obligation status">
         <div class="panel">
             <div class="metric-label">Current balance</div>
             <div class="metric-value">{{ balance_units|money_units }}</div>
         </div>
-        <div class="panel">
-            <div class="metric-label">Your role</div>
-            <div class="metric-value">{{ role }}</div>
-        </div>
+        {% if admin_preview %}
+            <div class="panel">
+                <div class="metric-label">Creditor</div>
+                <div class="metric-value">{{ obligation.creditor|user_label }}</div>
+            </div>
+            <div class="panel">
+                <div class="metric-label">Borrower</div>
+                <div class="metric-value">{{ obligation.borrower|user_label }}</div>
+            </div>
+        {% else %}
+            <div class="panel">
+                <div class="metric-label">{{ role_label }}</div>
+                <div class="metric-value">{{ role }}</div>
+            </div>
+        {% endif %}
         <div class="panel">
             <div class="metric-label">Status</div>
             <div class="metric-value">{{ obligation.get_status_display }}</div>
@@ -85,7 +188,7 @@
                     <th>Category</th>
                     <th>Details</th>
                     <th>Amount</th>
-                    {% if obligation.status == "open" %}<th></th>{% endif %}
+                    {% if can_manage_obligation %}<th></th>{% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -96,12 +199,12 @@
                         <td>{{ row.event.category|default:"-" }}</td>
                         <td>{{ row.details|default:"-" }}</td>
                         <td class="amount {{ row.amount_class }}">{{ row.signed_amount_units|signed_money_units }}</td>
-                        {% if obligation.status == "open" %}
+                        {% if can_manage_obligation %}
                             <td><a href="{% url 'ledger:manual_transfer_update' obligation.id row.event.id %}">Edit</a></td>
                         {% endif %}
                     </tr>
                 {% empty %}
-                    <tr><td colspan="{% if obligation.status == "open" %}6{% else %}5{% endif %}" class="empty">No manual transfers yet.</td></tr>
+                    <tr><td colspan="{% if can_manage_obligation %}6{% else %}5{% endif %}" class="empty">No manual transfers yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -120,7 +223,7 @@
                         <th>Amount</th>
                         <th>Schedule</th>
                         <th>Active</th>
-                        {% if obligation.status == "open" %}<th></th>{% endif %}
+                        {% if can_manage_obligation %}<th></th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -133,12 +236,12 @@
                             </td>
                             <td>{{ row.schedule_label }}</td>
                             <td>{{ row.series.active|yesno:"Yes,No" }}</td>
-                            {% if obligation.status == "open" %}
+                            {% if can_manage_obligation %}
                                 <td><a href="{% url 'ledger:recurring_series_update' obligation.id row.series.id %}">Edit</a></td>
                             {% endif %}
                         </tr>
                     {% empty %}
-                        <tr><td colspan="{% if obligation.status == "open" %}6{% else %}5{% endif %}" class="empty">No recurring events yet.</td></tr>
+                        <tr><td colspan="{% if can_manage_obligation %}6{% else %}5{% endif %}" class="empty">No recurring events yet.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -154,7 +257,7 @@
                         <th>APY</th>
                         <th>From</th>
                         <th>To</th>
-                        {% if obligation.status == "open" %}<th></th>{% endif %}
+                        {% if can_manage_obligation %}<th></th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -163,12 +266,12 @@
                             <td>{{ rate.annual_rate_percent }}%</td>
                             <td>{{ rate.effective_from }}</td>
                             <td>{{ rate.effective_to|default:"-" }}</td>
-                            {% if obligation.status == "open" %}
+                            {% if can_manage_obligation %}
                                 <td><a href="{% url 'ledger:interest_rate_update' obligation.id rate.id %}">Edit</a></td>
                             {% endif %}
                         </tr>
                     {% empty %}
-                        <tr><td colspan="{% if obligation.status == "open" %}4{% else %}3{% endif %}" class="empty">No interest rates yet.</td></tr>
+                        <tr><td colspan="{% if can_manage_obligation %}4{% else %}3{% endif %}" class="empty">No interest rates yet.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -181,51 +284,84 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
-    (() => {
-        const showPendingMessage = (text) => {
-            const page = document.querySelector('.page');
-            if (!page) return;
+{% if can_manage_obligation %}
+    <script>
+        (() => {
+            const showPendingMessage = (text) => {
+                const page = document.querySelector('.page');
+                if (!page) return;
 
-            let messages = page.querySelector('.messages');
-            if (!messages) {
-                messages = document.createElement('div');
-                messages.className = 'messages';
-                messages.setAttribute('aria-live', 'polite');
-                page.prepend(messages);
-            }
-
-            const message = document.createElement('div');
-            message.className = 'message';
-            message.textContent = text;
-            messages.replaceChildren(message);
-            messages.scrollIntoView({ block: 'start' });
-        };
-
-        const recalculateForm = document.querySelector('[data-recalculate-form]');
-        if (recalculateForm) {
-            recalculateForm.addEventListener('submit', () => {
-                const button = recalculateForm.querySelector('button[type="submit"]');
-                if (button) {
-                    button.disabled = true;
-                    button.textContent = 'Recalculating...';
+                let messages = page.querySelector('.messages');
+                if (!messages) {
+                    messages = document.createElement('div');
+                    messages.className = 'messages';
+                    messages.setAttribute('aria-live', 'polite');
+                    page.prepend(messages);
                 }
-                recalculateForm.closest('details')?.removeAttribute('open');
-                showPendingMessage('Recalculating...');
-            });
-        }
 
-        const form = document.querySelector('[data-stop-tracking-form]');
-        if (!form) return;
+                const message = document.createElement('div');
+                message.className = 'message';
+                message.textContent = text;
+                messages.replaceChildren(message);
+                messages.scrollIntoView({ block: 'start' });
+            };
 
-        form.addEventListener('submit', (event) => {
-            const confirmation = window.prompt('Type STOP to stop tracking this obligation.');
-            if (confirmation !== 'STOP') {
-                event.preventDefault();
-                return;
+            const recalculateForm = document.querySelector('[data-recalculate-form]');
+            if (recalculateForm) {
+                recalculateForm.addEventListener('submit', () => {
+                    const button = recalculateForm.querySelector('button[type="submit"]');
+                    if (button) {
+                        button.disabled = true;
+                        button.textContent = 'Recalculating...';
+                    }
+                    recalculateForm.closest('details')?.removeAttribute('open');
+                    showPendingMessage('Recalculating...');
+                });
             }
-            form.querySelector('input[name="stop_tracking_confirmation"]').value = confirmation;
-        });
-    })();
-</script>
+
+            const form = document.querySelector('[data-stop-tracking-form]');
+            if (!form) return;
+
+            form.addEventListener('submit', (event) => {
+                const confirmation = window.prompt('Type STOP to stop tracking this obligation.');
+                if (confirmation !== 'STOP') {
+                    event.preventDefault();
+                    return;
+                }
+                form.querySelector('input[name="stop_tracking_confirmation"]').value = confirmation;
+            });
+        })();
+    </script>
+{% endif %}
+{% if show_admin_obligation_actions %}
+    <script>
+        (() => {
+            document.querySelectorAll('[data-dialog-open]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const dialog = document.getElementById(button.dataset.dialogOpen);
+                    if (!dialog) return;
+                    if (typeof dialog.showModal === 'function') {
+                        dialog.showModal();
+                    } else {
+                        dialog.setAttribute('open', '');
+                    }
+                    const field = dialog.querySelector('input[type="text"]');
+                    if (field) field.focus();
+                });
+            });
+
+            document.querySelectorAll('[data-dialog-close]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const dialog = document.getElementById(button.dataset.dialogClose);
+                    if (!dialog) return;
+                    if (typeof dialog.close === 'function') {
+                        dialog.close();
+                    } else {
+                        dialog.removeAttribute('open');
+                    }
+                });
+            });
+        })();
+    </script>
+{% endif %}
 {% endblock %}

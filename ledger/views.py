@@ -92,6 +92,23 @@ def get_related_obligation(user, pk):
     return get_object_or_404(related_obligations(user), pk=pk)
 
 
+def get_viewable_obligation(user, pk):
+    if user.is_staff:
+        return get_object_or_404(
+            Obligation.objects.select_related('borrower', 'creditor', 'category'),
+            pk=pk,
+        )
+    return get_related_obligation(user, pk)
+
+
+def _is_obligation_participant(obligation, user):
+    return obligation.borrower_id == user.id or obligation.creditor_id == user.id
+
+
+def _is_admin_preview(obligation, user):
+    return user.is_staff and not _is_obligation_participant(obligation, user)
+
+
 def user_label(user):
     return user.get_full_name() or user.get_username()
 
@@ -195,6 +212,19 @@ def _hard_delete_obligation(obligation):
     deleted_count += LedgerAccount.objects.filter(obligation=obligation).delete()[0]
     deleted_count += Obligation.objects.filter(pk=obligation.pk).delete()[0]
     return deleted_count
+
+
+def _close_obligation_tracking(obligation, closed_on):
+    obligation.status = Obligation.Status.CLOSED
+    obligation.closed_on = closed_on
+    obligation.save(update_fields=['status', 'closed_on', 'updated_at'])
+    EventSeries.objects.filter(obligation=obligation, active=True, starts_on__lte=closed_on).update(
+        active=False,
+        ends_on=closed_on,
+    )
+    EventSeries.objects.filter(obligation=obligation, active=True, starts_on__gt=closed_on).update(
+        active=False,
+    )
 
 
 def signup(request):
@@ -520,10 +550,10 @@ def admin_obligation_restore(request, pk):
     expected_confirmation = f'OPEN {obligation.pk}'
     if request.POST.get('restore_confirmation') != expected_confirmation:
         messages.error(request, f'Type "{expected_confirmation}" to restore this obligation.')
-        return redirect('ledger:admin_obligations')
+        return redirect('ledger:obligation_detail', pk=obligation.pk)
     if obligation.status == Obligation.Status.OPEN:
         messages.info(request, f'Obligation {obligation.title} is already open.')
-        return redirect('ledger:admin_obligations')
+        return redirect('ledger:obligation_detail', pk=obligation.pk)
 
     previous_status = obligation.status
     previous_closed_on = obligation.closed_on
@@ -541,7 +571,35 @@ def admin_obligation_restore(request, pk):
             },
         )
     messages.success(request, f'Obligation {obligation.title} was restored. Review recurring schedules before generating future events.')
-    return redirect('ledger:admin_obligations')
+    return redirect('ledger:obligation_detail', pk=obligation.pk)
+
+
+@login_required
+@require_POST
+def admin_obligation_close(request, pk):
+    if not request.user.is_staff:
+        return HttpResponseForbidden('Only staff users can access the admin panel.')
+
+    obligation = get_object_or_404(Obligation, pk=pk)
+    expected_confirmation = f'CLOSE {obligation.pk}'
+    if request.POST.get('close_confirmation') != expected_confirmation:
+        messages.error(request, f'Type "{expected_confirmation}" to close this obligation.')
+        return redirect('ledger:obligation_detail', pk=obligation.pk)
+    if obligation.status != Obligation.Status.OPEN:
+        messages.info(request, f'Obligation {obligation.title} is already closed.')
+        return redirect('ledger:obligation_detail', pk=obligation.pk)
+
+    closed_on = timezone.localdate()
+    with transaction.atomic():
+        _close_obligation_tracking(obligation, closed_on)
+        AuditEvent.objects.create(
+            actor=request.user,
+            event_type='admin_obligation_closed',
+            obligation=obligation,
+            payload={'closed_on': closed_on.isoformat()},
+        )
+    messages.success(request, f'Obligation {obligation.title} was closed and future recurring charges were stopped.')
+    return redirect('ledger:obligation_detail', pk=obligation.pk)
 
 
 @login_required
@@ -551,10 +609,14 @@ def admin_obligation_delete(request, pk):
         return HttpResponseForbidden('Only staff users can access the admin panel.')
 
     obligation = get_object_or_404(Obligation, pk=pk)
+    if obligation.status == Obligation.Status.OPEN:
+        messages.error(request, 'Close this obligation before deleting it.')
+        return redirect('ledger:obligation_detail', pk=obligation.pk)
+
     expected_confirmation = f'DELETE {obligation.pk}'
     if request.POST.get('delete_confirmation') != expected_confirmation:
         messages.error(request, f'Type "{expected_confirmation}" to permanently delete this obligation.')
-        return redirect('ledger:admin_obligations')
+        return redirect('ledger:obligation_detail', pk=obligation.pk)
 
     title = obligation.title
     try:
@@ -838,7 +900,9 @@ def obligation_list(request):
 
 @login_required
 def obligation_detail(request, pk):
-    obligation = get_related_obligation(request.user, pk)
+    obligation = get_viewable_obligation(request.user, pk)
+    admin_preview = _is_admin_preview(obligation, request.user)
+    can_manage_obligation = _is_obligation_participant(obligation, request.user) and obligation.status == Obligation.Status.OPEN
     financial_events_queryset = FinancialEvent.objects.filter(obligation=obligation).order_by('-event_date')
     manual_transfers = _manual_transfer_events(obligation)
     event_series = (
@@ -851,15 +915,28 @@ def obligation_detail(request, pk):
         'obligation': obligation,
         'balance_units': get_obligation_balance(obligation),
         'role': _role_for(obligation, request.user),
+        'role_label': 'Your role',
+        'admin_preview': admin_preview,
+        'show_admin_obligation_actions': request.user.is_staff,
+        'admin_can_close_obligation': request.user.is_staff and obligation.status == Obligation.Status.OPEN,
+        'admin_can_restore_or_delete_obligation': request.user.is_staff and obligation.status != Obligation.Status.OPEN,
+        'admin_close_confirmation': f'CLOSE {obligation.pk}',
+        'admin_restore_confirmation': f'OPEN {obligation.pk}',
+        'admin_delete_confirmation': f'DELETE {obligation.pk}',
+        'can_manage_obligation': can_manage_obligation,
+        'can_stop_tracking_obligation': can_manage_obligation,
         'activity_rows': [
-            _activity_row(event, request.user)
+            _activity_row(event, request.user, neutral=admin_preview)
             for event in financial_events_queryset.select_related('obligation')[:HISTORY_PREVIEW_LIMIT]
         ],
         'activity_title': 'Recent activity',
         'activity_preview': True,
         'activity_total': activity_total,
         'activity_has_more': activity_total > HISTORY_PREVIEW_LIMIT,
-        'manual_transfer_rows': [_manual_transfer_row(event, request.user) for event in manual_transfers],
+        'manual_transfer_rows': [
+            _manual_transfer_row(event, request.user, neutral=admin_preview)
+            for event in manual_transfers
+        ],
         'event_series_rows': [_event_series_row(series) for series in event_series],
         'interest_rates': InterestRatePeriod.objects.filter(obligation=obligation).order_by('-effective_from'),
     }
@@ -869,7 +946,8 @@ def obligation_detail(request, pk):
 
 @login_required
 def obligation_history(request, pk):
-    obligation = get_related_obligation(request.user, pk)
+    obligation = get_viewable_obligation(request.user, pk)
+    admin_preview = _is_admin_preview(obligation, request.user)
     financial_events = FinancialEvent.objects.filter(obligation=obligation).select_related('obligation').order_by('-event_date')
     activity_total = financial_events.count()
     return render(
@@ -877,7 +955,8 @@ def obligation_history(request, pk):
         'ledger/obligation_history.html',
         {
             'obligation': obligation,
-            'activity_rows': [_activity_row(event, request.user) for event in financial_events],
+            'admin_preview': admin_preview,
+            'activity_rows': [_activity_row(event, request.user, neutral=admin_preview) for event in financial_events],
             'activity_title': 'Activity history',
             'activity_preview': False,
             'activity_total': activity_total,
@@ -888,7 +967,7 @@ def obligation_history(request, pk):
 
 @login_required
 def obligation_accounting_history(request, pk):
-    obligation = get_related_obligation(request.user, pk)
+    obligation = get_viewable_obligation(request.user, pk)
     ledger_entries = (
         LedgerEntry.objects.filter(account__obligation=obligation)
         .select_related('transaction', 'account')
@@ -1273,16 +1352,7 @@ def obligation_close(request, pk):
 
     closed_on = timezone.localdate()
     with transaction.atomic():
-        obligation.status = Obligation.Status.CLOSED
-        obligation.closed_on = closed_on
-        obligation.save(update_fields=['status', 'closed_on', 'updated_at'])
-        EventSeries.objects.filter(obligation=obligation, active=True, starts_on__lte=closed_on).update(
-            active=False,
-            ends_on=closed_on,
-        )
-        EventSeries.objects.filter(obligation=obligation, active=True, starts_on__gt=closed_on).update(
-            active=False,
-        )
+        _close_obligation_tracking(obligation, closed_on)
     messages.success(request, 'Obligation was closed and future recurring charges were stopped.')
     return redirect('ledger:obligation_detail', pk=obligation.pk)
 
@@ -1356,11 +1426,11 @@ def _manual_transfer_events(obligation):
     )
 
 
-def _manual_transfer_row(event, user):
-    signed_amount_units = _signed_event_amount_units(event, user)
+def _manual_transfer_row(event, user, neutral=False):
+    signed_amount_units = _signed_event_amount_units(event, user, neutral=neutral)
     return {
         'event': event,
-        'label': _activity_label(event, user),
+        'label': _activity_label(event, user, neutral=neutral),
         'signed_amount_units': signed_amount_units,
         'amount_class': 'positive' if signed_amount_units >= 0 else 'negative',
         'details': _truncate_activity_details(event.memo),
@@ -1384,11 +1454,11 @@ def _event_series_schedule_label(series):
     return f'{series.get_frequency_display()} on {_weekday_name(series.day_of_week)}'
 
 
-def _activity_row(event, user):
-    signed_amount_units = _signed_event_amount_units(event, user)
+def _activity_row(event, user, neutral=False):
+    signed_amount_units = _signed_event_amount_units(event, user, neutral=neutral)
     return {
         'event': event,
-        'label': _activity_label(event, user),
+        'label': _activity_label(event, user, neutral=neutral),
         'signed_amount_units': signed_amount_units,
         'amount_class': 'positive' if signed_amount_units >= 0 else 'negative',
         'category': event.category,
@@ -1396,14 +1466,34 @@ def _activity_row(event, user):
     }
 
 
-def _signed_event_amount_units(event, user):
+def _signed_event_amount_units(event, user, neutral=False):
+    if neutral:
+        if event.direction == FinancialEvent.Direction.INCREASES_DEBT:
+            return event.amount_units
+        return -event.amount_units
+
     user_is_borrower = event.obligation.borrower_id == user.id
     if event.direction == FinancialEvent.Direction.INCREASES_DEBT:
         return event.amount_units if user_is_borrower else -event.amount_units
     return -event.amount_units if user_is_borrower else event.amount_units
 
 
-def _activity_label(event, user):
+def _activity_label(event, user, neutral=False):
+    if neutral:
+        if event.event_type == FinancialEvent.EventType.PRINCIPAL_ADVANCE:
+            return 'Debt increase'
+        if event.event_type == FinancialEvent.EventType.REPAYMENT:
+            return 'Repayment'
+        if event.event_type == FinancialEvent.EventType.SCHEDULED_CHARGE:
+            return 'Scheduled charge'
+        if event.event_type == FinancialEvent.EventType.INTEREST_POSTING:
+            return 'Interest added'
+        if event.event_type == FinancialEvent.EventType.ADJUSTMENT:
+            if event.category == 'recurring_reversal':
+                return 'Recurring event reversed'
+            return 'Adjustment'
+        return event.get_event_type_display()
+
     user_is_borrower = event.obligation.borrower_id == user.id
     if event.event_type == FinancialEvent.EventType.PRINCIPAL_ADVANCE:
         return 'You borrowed' if user_is_borrower else 'You lent'
@@ -1430,7 +1520,9 @@ def _weekday_name(day_of_week):
 def _role_for(obligation, user):
     if obligation.borrower_id == user.id:
         return 'borrower'
-    return 'creditor'
+    if obligation.creditor_id == user.id:
+        return 'creditor'
+    return 'admin preview' if user.is_staff else 'viewer'
 
 
 def _truncate_activity_details(value, limit=50):
