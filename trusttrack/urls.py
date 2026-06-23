@@ -23,6 +23,9 @@ urlpatterns = [
     path('', include('ledger.urls')),
     path('accounts/signup/', ledger_views.signup, name='signup'),
     path('accounts/password-rules/', ledger_views.password_rule_status, name='password_rules'),
+    path('accounts/telegram-login/', ledger_views.telegram_login, name='telegram_login'),
+    path('accounts/telegram-login/status/', ledger_views.telegram_login_status, name='telegram_login_status'),
+    path('accounts/telegram-login/restart/', ledger_views.telegram_login_restart, name='telegram_login_restart'),
     path('accounts/', include('django.contrib.auth.urls')),
     path('admin/', admin.site.urls),
 ]

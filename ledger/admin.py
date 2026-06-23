@@ -12,6 +12,7 @@ from .models import (
     LedgerTransaction,
     Obligation,
     ObligationCategory,
+    TelegramLoginChallenge,
     UserProfile,
 )
 
@@ -66,6 +67,12 @@ class UserProfileAdmin(admin.ModelAdmin):
         '=telegram_id',
         'telegram_username',
     )
+
+
+@admin.register(TelegramLoginChallenge)
+class TelegramLoginChallengeAdmin(InternalLedgerAdminMixin):
+    list_display = ('code', 'user', 'telegram_id', 'expires_at', 'confirmed_at', 'consumed_at')
+    search_fields = ('code', 'token', 'user__username', '=telegram_id')
 
 
 @admin.register(Obligation)

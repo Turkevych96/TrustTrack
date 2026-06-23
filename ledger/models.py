@@ -78,6 +78,40 @@ class UserProfile(TimestampedModel):
         return full_name or self.telegram_title
 
 
+class TelegramLoginChallenge(TimestampedModel):
+    token = models.CharField(max_length=96, unique=True, db_index=True)
+    code = models.CharField(max_length=16, unique=True, db_index=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='telegram_login_challenges',
+        null=True,
+        blank=True,
+    )
+    telegram_id = models.BigIntegerField(null=True, blank=True)
+    expires_at = models.DateTimeField()
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Telegram login {self.code}'
+
+    @property
+    def is_confirmed(self):
+        return self.confirmed_at is not None and self.user_id is not None
+
+    @property
+    def is_consumed(self):
+        return self.consumed_at is not None
+
+    def is_expired(self, now=None):
+        now = now or timezone.now()
+        return self.expires_at <= now
+
+
 class Obligation(TimestampedModel):
     class Status(models.TextChoices):
         OPEN = 'open', 'Open'

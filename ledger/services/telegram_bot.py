@@ -24,6 +24,10 @@ from ledger.services.events import post_principal_advance, post_repayment
 from ledger.services.money import decimal_from_units, units_from_decimal
 from ledger.services.notifications import send_obligation_created_notification
 from ledger.services.recalculation import recalculate_obligation
+from ledger.services.telegram_login import (
+    confirm_challenge_by_code,
+    confirm_challenge_by_start_payload,
+)
 
 
 QUICK_REPAYMENT_AMOUNTS = (Decimal('25'), Decimal('50'), Decimal('100'))
@@ -146,6 +150,26 @@ TELEGRAM_TEXT = {
     'settings_on': {LANG_EN: 'on', LANG_RU: 'включены'},
     'settings_off': {LANG_EN: 'off', LANG_RU: 'отключены'},
     'processed': {LANG_EN: 'Processed', LANG_RU: 'Готово'},
+    'telegram_login_confirmed': {
+        LANG_EN: 'Web login confirmed for {user}. Return to the browser.',
+        LANG_RU: 'Вход на сайте подтверждён для {user}. Вернитесь в браузер.',
+    },
+    'telegram_login_not_found': {
+        LANG_EN: 'Login code was not found. Create a new code from the TrustTrack login page.',
+        LANG_RU: 'Код входа не найден. Создайте новый код на странице входа TrustTrack.',
+    },
+    'telegram_login_expired': {
+        LANG_EN: 'Login code expired. Create a new code from the TrustTrack login page.',
+        LANG_RU: 'Код входа истёк. Создайте новый код на странице входа TrustTrack.',
+    },
+    'telegram_login_consumed': {
+        LANG_EN: 'Login code was already used. Create a new code from the TrustTrack login page.',
+        LANG_RU: 'Код входа уже использован. Создайте новый код на странице входа TrustTrack.',
+    },
+    'telegram_login_access_denied': {
+        LANG_EN: 'This Telegram ID is not allowed to confirm that login.',
+        LANG_RU: 'Этот Telegram ID не может подтвердить этот вход.',
+    },
     'language_english': {LANG_EN: 'English', LANG_RU: 'английский'},
     'language_russian': {LANG_EN: 'Russian', LANG_RU: 'русский'},
     'unknown_command': {LANG_EN: 'Unknown command.', LANG_RU: 'Неизвестная команда.'},
@@ -476,6 +500,13 @@ def _process_message(message, today, nonce_factory):
     command, *raw_args = text.split(maxsplit=1)
     command = command.split('@', maxsplit=1)[0].lower()
     args_text = raw_args[0] if raw_args else ''
+
+    if command == '/start' and args_text.startswith('login_'):
+        result = confirm_challenge_by_start_payload(args_text, telegram_user_id)
+        return _single_message(chat_id, _telegram_login_confirmation_text(result, lang))
+    if command in ('/login', '/signin'):
+        result = confirm_challenge_by_code(args_text, telegram_user_id)
+        return _single_message(chat_id, _telegram_login_confirmation_text(result, lang))
 
     if command in ('/start', '/help'):
         _clear_pending_context(telegram_user_id)
@@ -1632,6 +1663,18 @@ def _unknown_command_text(user, lang=None):
         '',
         _t(lang, 'unknown_command_hint', user=_user_label(user)),
     ])
+
+
+def _telegram_login_confirmation_text(result, lang=LANG_EN):
+    if result.status == 'confirmed':
+        return _t(lang, 'telegram_login_confirmed', user=_user_label(result.user))
+    if result.status == 'expired':
+        return _t(lang, 'telegram_login_expired')
+    if result.status == 'consumed':
+        return _t(lang, 'telegram_login_consumed')
+    if result.status == 'access_denied':
+        return _t(lang, 'telegram_login_access_denied')
+    return _t(lang, 'telegram_login_not_found')
 
 
 def _obligation_summary_line(user, obligation, today=None, lang=None):

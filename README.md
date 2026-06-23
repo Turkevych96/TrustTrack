@@ -103,6 +103,7 @@ Use the admin username and password created with `createsuperuser`.
 For the local family setup, TrustTrack can run the Django site, Telegram polling bot, and due job scheduler together without exposing the site to the internet.
 
 Make sure `.env` contains `TELEGRAM_BOT_TOKEN`, and each allowed user has their Telegram ID saved in Profile.
+Set `TELEGRAM_BOT_USERNAME` without `@` to enable QR/deep-link Telegram login from the web login page.
 
 Start all local processes with one foreground command:
 

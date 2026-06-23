@@ -60,6 +60,13 @@ from ledger.services.planner import build_portfolio_projection, simulate_monthly
 from ledger.services.recalculation import recalculate_obligation
 from ledger.services.recurring import generate_due_recurring_events, recalculate_due_recurring_events
 from ledger.services.telegram import TelegramLookupError, get_telegram_chat_identity, send_telegram_message
+from ledger.services.telegram_login import (
+    CHALLENGE_SESSION_KEY,
+    challenge_status_for_session,
+    consume_confirmed_session_challenge,
+    get_or_create_session_challenge,
+    telegram_login_page_context,
+)
 
 
 HISTORY_PREVIEW_LIMIT = 10
@@ -244,6 +251,44 @@ def signup(request):
         form = SignUpForm()
 
     return render(request, 'registration/signup.html', {'form': form})
+
+
+def telegram_login(request):
+    if request.user.is_authenticated:
+        return redirect('ledger:dashboard')
+
+    challenge = get_or_create_session_challenge(request)
+    return render(
+        request,
+        'registration/telegram_login.html',
+        telegram_login_page_context(request, challenge),
+    )
+
+
+def telegram_login_status(request):
+    if request.user.is_authenticated:
+        return JsonResponse({'status': 'authenticated', 'redirect_url': reverse('ledger:dashboard')})
+
+    status = challenge_status_for_session(request)
+    if status['status'] == 'confirmed':
+        user = consume_confirmed_session_challenge(request)
+        if user:
+            login(request, user)
+            return JsonResponse({'status': 'authenticated', 'redirect_url': reverse('ledger:dashboard')})
+        status = challenge_status_for_session(request)
+
+    response = {'status': status['status']}
+    if status['status'] in {'expired', 'missing', 'consumed'}:
+        request.session.pop(CHALLENGE_SESSION_KEY, None)
+        request.session.modified = True
+        response['restart_url'] = reverse('telegram_login_restart')
+    return JsonResponse(response)
+
+
+def telegram_login_restart(request):
+    request.session.pop(CHALLENGE_SESSION_KEY, None)
+    request.session.modified = True
+    return redirect('telegram_login')
 
 
 @require_POST

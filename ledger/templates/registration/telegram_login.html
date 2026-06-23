@@ -1,0 +1,88 @@
+{% extends "ledger/base.html" %}
+
+{% block title %}Telegram login - TrustTrack{% endblock %}
+{% block page_class %}form-page{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div>
+        <h1>Telegram login</h1>
+        <div class="muted">Confirm access from a Telegram ID saved in your TrustTrack profile.</div>
+    </div>
+</div>
+
+<section class="panel form-grid">
+    {% if telegram_deep_link %}
+        <div class="telegram-login-qr">
+            <img src="{{ telegram_qr_svg_data_uri }}" alt="Telegram login QR code">
+        </div>
+        <div class="actions">
+            <a class="button" href="{{ telegram_deep_link }}">Open Telegram</a>
+        </div>
+    {% else %}
+        <div class="setting-note">
+            Telegram bot username is not configured, so QR login is unavailable.
+        </div>
+    {% endif %}
+
+    <div>
+        <label for="id_telegram_command">One-time Telegram command</label>
+        <input id="id_telegram_command" type="text" value="{{ telegram_login_command }}" readonly>
+        <div class="muted">
+            Send this command to {% if telegram_bot_username %}@{{ telegram_bot_username }}{% else %}the TrustTrack bot{% endif %}.
+        </div>
+    </div>
+
+    <div id="telegram-login-status" class="message" data-status-url="{{ status_url }}" data-restart-url="{{ restart_url }}">
+        Waiting for Telegram confirmation.
+    </div>
+
+    <div class="actions">
+        <a class="button secondary" href="{% url 'login' %}">Use password instead</a>
+        <a class="button secondary" href="{{ restart_url }}">New code</a>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    (() => {
+        const statusNode = document.getElementById('telegram-login-status');
+        if (!statusNode) return;
+
+        const statusUrl = statusNode.dataset.statusUrl;
+        const restartUrl = statusNode.dataset.restartUrl;
+        const messages = {
+            pending: 'Waiting for Telegram confirmation.',
+            expired: 'This login code expired. Create a new code.',
+            missing: 'This login code is no longer available. Create a new code.',
+            consumed: 'This login code was already used. Create a new code.',
+        };
+
+        const checkStatus = async () => {
+            const response = await fetch(statusUrl, {
+                headers: { 'Accept': 'application/json' },
+                credentials: 'same-origin',
+            });
+            const payload = await response.json();
+            if (payload.status === 'authenticated' && payload.redirect_url) {
+                window.location.assign(payload.redirect_url);
+                return;
+            }
+            statusNode.textContent = messages[payload.status] || messages.pending;
+            if (payload.restart_url || ['expired', 'missing', 'consumed'].includes(payload.status)) {
+                window.clearInterval(timer);
+                if (!statusNode.querySelector('a')) {
+                    const link = document.createElement('a');
+                    link.href = payload.restart_url || restartUrl;
+                    link.textContent = ' New code';
+                    statusNode.appendChild(link);
+                }
+            }
+        };
+
+        const timer = window.setInterval(checkStatus, 2500);
+        checkStatus();
+    })();
+</script>
+{% endblock %}

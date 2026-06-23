@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone as datetime_timezone
+from datetime import date, datetime, timedelta, timezone as datetime_timezone
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
@@ -24,6 +24,7 @@ from ledger.models import (
     LedgerTransaction,
     Obligation,
     ObligationCategory,
+    TelegramLoginChallenge,
     UserProfile,
 )
 from ledger.services.backups import create_sqlite_backup
@@ -182,6 +183,51 @@ class TelegramBotTests(LedgerTestCase):
         self.assertEqual(len(result.messages), 1)
         self.assertIn('Access is not configured', result.messages[0].text)
         self.assertIn('555', result.messages[0].text)
+
+    def test_login_command_confirms_challenge_for_configured_telegram_id(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        challenge = TelegramLoginChallenge.objects.create(
+            token='login-token',
+            code='ABCD1234',
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+
+        result = process_telegram_update(self._telegram_message('/login ABCD-1234', telegram_id=555))
+
+        challenge.refresh_from_db()
+        self.assertEqual(challenge.user, self.borrower_user)
+        self.assertEqual(challenge.telegram_id, 555)
+        self.assertIsNotNone(challenge.confirmed_at)
+        self.assertIn('Web login confirmed for Andrii', result.messages[0].text)
+
+    def test_start_login_payload_confirms_challenge_for_configured_telegram_id(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        challenge = TelegramLoginChallenge.objects.create(
+            token='deep-link-token',
+            code='EFGH5678',
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+
+        result = process_telegram_update(self._telegram_message('/start login_deep-link-token', telegram_id=555))
+
+        challenge.refresh_from_db()
+        self.assertEqual(challenge.user, self.borrower_user)
+        self.assertIsNotNone(challenge.confirmed_at)
+        self.assertIn('Web login confirmed for Andrii', result.messages[0].text)
+
+    def test_login_command_requires_configured_telegram_id(self):
+        challenge = TelegramLoginChallenge.objects.create(
+            token='login-token',
+            code='ABCD1234',
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+
+        result = process_telegram_update(self._telegram_message('/login ABCD-1234', telegram_id=555))
+
+        challenge.refresh_from_db()
+        self.assertIsNone(challenge.user)
+        self.assertIsNone(challenge.confirmed_at)
+        self.assertIn('Access is not configured', result.messages[0].text)
 
     def test_start_shows_home_summary_without_obligation_list(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
@@ -1571,6 +1617,52 @@ class ViewTests(LedgerTestCase):
 
         self.assertContains(response, reverse('signup'))
         self.assertContains(response, 'Create account')
+        self.assertContains(response, reverse('telegram_login'))
+        self.assertContains(response, 'Log in with Telegram')
+
+    @override_settings(TELEGRAM_BOT_USERNAME='TrustTrack_bot')
+    def test_telegram_login_page_creates_challenge_with_qr_and_code(self):
+        response = self.client.get(reverse('telegram_login'))
+
+        challenge = TelegramLoginChallenge.objects.get()
+        self.assertEqual(self.client.session['telegram_login_challenge_token'], challenge.token)
+        self.assertContains(response, 'Telegram login')
+        self.assertContains(response, 'Open Telegram')
+        self.assertContains(response, '@TrustTrack_bot')
+        self.assertContains(response, 'data:image/svg+xml')
+        self.assertContains(response, f'/login {challenge.code[:4]}-{challenge.code[4:]}')
+        self.assertContains(response, reverse('telegram_login_status'))
+
+    def test_telegram_login_status_authenticates_confirmed_session_challenge(self):
+        self.client.get(reverse('telegram_login'))
+        challenge = TelegramLoginChallenge.objects.get()
+        challenge.user = self.borrower_user
+        challenge.telegram_id = 555
+        challenge.confirmed_at = timezone.now()
+        challenge.save(update_fields=['user', 'telegram_id', 'confirmed_at', 'updated_at'])
+
+        response = self.client.get(reverse('telegram_login_status'))
+
+        challenge.refresh_from_db()
+        self.assertEqual(response.json()['status'], 'authenticated')
+        self.assertEqual(int(self.client.session['_auth_user_id']), self.borrower_user.pk)
+        self.assertIsNotNone(challenge.consumed_at)
+        self.assertNotIn('telegram_login_challenge_token', self.client.session)
+
+    def test_telegram_login_status_does_not_authenticate_without_matching_session_token(self):
+        TelegramLoginChallenge.objects.create(
+            token='other-token',
+            code='ABCD1234',
+            user=self.borrower_user,
+            telegram_id=555,
+            expires_at=timezone.now() + timedelta(minutes=5),
+            confirmed_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse('telegram_login_status'))
+
+        self.assertEqual(response.json()['status'], 'missing')
+        self.assertNotIn('_auth_user_id', self.client.session)
 
     def test_signup_creates_user_profile_and_logs_user_in(self):
         response = self.client.post(
