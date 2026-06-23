@@ -556,6 +556,10 @@ class TelegramBotTests(LedgerTestCase):
             self._telegram_callback(f'transfer:repayment:{self.obligation.pk}', telegram_id=555),
             today=date(2026, 1, 10),
         )
+        debt_menu_result = process_telegram_update(
+            self._telegram_callback(f'transfer:advance:{self.obligation.pk}', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
         transfer_menu_result = process_telegram_update(
             self._telegram_callback(f'transfermenu:{self.obligation.pk}', telegram_id=555),
             today=date(2026, 1, 10),
@@ -607,6 +611,16 @@ class TelegramBotTests(LedgerTestCase):
             repayment_buttons[-2][0],
             {'text': 'Custom amount', 'callback_data': f'customrepay:{self.obligation.pk}', 'style': 'primary'},
         )
+        self.assertIn('Debt increase for Test loan', debt_menu_result.messages[0].text)
+        debt_buttons = debt_menu_result.messages[0].reply_markup['inline_keyboard']
+        self.assertIn(
+            {'text': 'Add $25.00', 'callback_data': f'advanceamt:{self.obligation.pk}:250000', 'style': 'danger'},
+            debt_buttons[0],
+        )
+        self.assertEqual(
+            debt_buttons[-2][0],
+            {'text': 'Custom amount', 'callback_data': f'customadvance:{self.obligation.pk}', 'style': 'primary'},
+        )
 
     def test_repayment_amount_button_opens_confirmation(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
@@ -637,7 +651,7 @@ class TelegramBotTests(LedgerTestCase):
             today=date(2026, 1, 10),
         )
         confirmation = process_telegram_update(
-            self._telegram_message('37.50', telegram_id=555),
+            self._telegram_message('37.50', telegram_id=555, message_id=401),
             today=date(2026, 1, 10),
             nonce_factory=lambda: 'custom',
         )
@@ -651,6 +665,7 @@ class TelegramBotTests(LedgerTestCase):
         self.assertIn('Amount: $37.50', confirmation.messages[0].text)
         self.assertIn('Date: 01/10/2026', confirmation.messages[0].text)
         self.assertNotIn(f'O{self.obligation.pk}', confirmation.messages[0].text)
+        self.assertEqual(confirmation.delete_messages, [TelegramMessageDelete(555, 401)])
         self.assertEqual(
             confirmation.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
             f'repay:{self.obligation.pk}:375000:2026-01-10:custom',
@@ -678,6 +693,22 @@ class TelegramBotTests(LedgerTestCase):
             confirmation.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
             f'repay:{self.obligation.pk}:545000:2026-01-10:comma',
         )
+
+    def test_custom_repayment_invalid_amount_deletes_user_message(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+        post_principal_advance(self.obligation, amount_units=1_000_000, event_date=date(2026, 1, 1))
+
+        process_telegram_update(
+            self._telegram_callback(f'customrepay:{self.obligation.pk}', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
+        result = process_telegram_update(
+            self._telegram_message('not a number', telegram_id=555, message_id=403),
+            today=date(2026, 1, 10),
+        )
+
+        self.assertIn('Amount must be a number', result.messages[0].text)
+        self.assertEqual(result.delete_messages, [TelegramMessageDelete(555, 403)])
 
     def test_repayment_preview_requires_confirmation_button(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
@@ -723,12 +754,16 @@ class TelegramBotTests(LedgerTestCase):
     def test_debt_increase_button_records_manual_advance(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
 
-        prompt = process_telegram_update(
+        menu = process_telegram_update(
             self._telegram_callback(f'transfer:advance:{self.obligation.pk}', telegram_id=555),
             today=date(2026, 1, 10),
         )
+        prompt = process_telegram_update(
+            self._telegram_callback(f'customadvance:{self.obligation.pk}', telegram_id=555),
+            today=date(2026, 1, 10),
+        )
         confirmation = process_telegram_update(
-            self._telegram_message('75.00', telegram_id=555),
+            self._telegram_message('75.00', telegram_id=555, message_id=402),
             today=date(2026, 1, 10),
             nonce_factory=lambda: 'advance',
         )
@@ -740,9 +775,12 @@ class TelegramBotTests(LedgerTestCase):
         first_result = process_telegram_update(update, today=date(2026, 1, 10))
         second_result = process_telegram_update(update, today=date(2026, 1, 10))
 
+        self.assertIn('Choose an amount', menu.messages[0].text)
         self.assertIn('Debt increase for Test loan', prompt.messages[0].text)
+        self.assertIn('Send only the amount', prompt.messages[0].text)
         self.assertIn('Confirm debt increase', confirmation.messages[0].text)
         self.assertIn('Action: Debt increase', confirmation.messages[0].text)
+        self.assertEqual(confirmation.delete_messages, [TelegramMessageDelete(555, 402)])
         self.assertEqual(
             confirmation.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
             f'advance:{self.obligation.pk}:750000:2026-01-10:advance',
@@ -751,6 +789,22 @@ class TelegramBotTests(LedgerTestCase):
         self.assertIn('Debt increase recorded', first_result.messages[0].text)
         self.assertIn('already recorded', second_result.messages[0].text)
         self.assertEqual(LedgerTransaction.objects.filter(idempotency_key__startswith='telegram-advance:').count(), 1)
+
+    def test_debt_increase_quick_amount_opens_confirmation(self):
+        UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
+
+        result = process_telegram_update(
+            self._telegram_callback(f'advanceamt:{self.obligation.pk}:500000', telegram_id=555),
+            today=date(2026, 1, 10),
+            nonce_factory=lambda: 'quick',
+        )
+
+        self.assertIn('Confirm debt increase', result.messages[0].text)
+        self.assertIn('Amount: $50.00', result.messages[0].text)
+        self.assertEqual(
+            result.messages[0].reply_markup['inline_keyboard'][0][0]['callback_data'],
+            f'advance:{self.obligation.pk}:500000:2026-01-10:quick',
+        )
 
     def test_group_chat_does_not_expose_financial_data(self):
         UserProfile.objects.create(user=self.borrower_user, telegram_id=555)
